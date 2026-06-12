@@ -1,0 +1,32 @@
+import numpy as np
+import cv2
+from photopicker.backend.detector import detect_blur, detect_exposure, calculate_score
+
+def test_detect_blur_sharp():
+    img = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
+    sharpness = detect_blur(img)
+    assert sharpness > 0
+
+def test_detect_blur_smooth():
+    img = np.ones((100, 100, 3), dtype=np.uint8) * 128
+    smoothness = detect_blur(img)
+    assert smoothness == 0
+
+def test_detect_exposure_normal():
+    img = np.random.randint(80, 180, (100, 100, 3), dtype=np.uint8)
+    result = detect_exposure(img)
+    assert result["overexposed"] is False
+    assert result["underexposed"] is False
+
+def test_detect_exposure_overexposed():
+    img = np.ones((100, 100, 3), dtype=np.uint8) * 250
+    result = detect_exposure(img)
+    assert result["overexposed"] is True
+
+def test_calculate_score_high():
+    score = calculate_score(is_closed_eye=False, sharpness=100, exposure_ok=True, is_shake=False)
+    assert score >= 80
+
+def test_calculate_score_low_closed_eye():
+    score = calculate_score(is_closed_eye=True, sharpness=100, exposure_ok=True, is_shake=False)
+    assert score < 50

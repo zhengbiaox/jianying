@@ -28,6 +28,8 @@ from photopicker.backend.cache import get_thumbnail as get_cached_thumbnail
 from photopicker.backend.runtime import get_device, device_info
 from photopicker.backend.logger import setup_logger, get_logger
 from photopicker.backend.watermark import add_watermark, batch_watermark, read_exif
+from photopicker.backend.aesthetic import compute_aesthetic_score
+from photopicker.backend.preferences import PreferenceTracker
 
 app = FastAPI(title="PhotoPicker")
 
@@ -49,6 +51,7 @@ cache_dir: str = ""
 runtime_preference = "auto"
 
 progress_state = {"status": "idle", "done": 0, "total": 0, "label": ""}
+pref_tracker: PreferenceTracker | None = None
 
 BROKEN_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 360"><rect width="100%" height="100%" fill="#1a1a2e"/><text x="50%" y="50%" text-anchor="middle" font-family="sans-serif" font-size="20" fill="#666">Error</text></svg>'.encode("utf-8")
 
@@ -75,8 +78,9 @@ def _load_clip():
 
 @app.post("/api/import")
 def import_folder(folder_path: str):
-    global current_folder, clip_model, session_state, cache_dir
+    global current_folder, clip_model, session_state, cache_dir, pref_tracker
     current_folder = folder_path
+    pref_tracker = PreferenceTracker(folder_path)
     cache_dir = os.path.join(folder_path, ".photopicker_cache")
     setup_logger(folder_path)
     pairs = pair_jpg_raw(folder_path)
@@ -152,6 +156,17 @@ def run_detection():
     if session_state:
         save_session(session_state, current_folder)
     return {"detected": len(photos_db)}
+
+
+@app.post("/api/aesthetic")
+def run_aesthetic():
+    for photo_id, photo in photos_db.items():
+        try:
+            result = compute_aesthetic_score(photo.path)
+            photo.aesthetic_score = result["score"]
+        except Exception:
+            continue
+    return {"scored": len(photos_db)}
 
 
 @app.post("/api/group")
@@ -238,6 +253,13 @@ def submit_pk(result: PKResult):
         photos_db[result.loser_id].is_rejected = True
     if result.winner_id in photos_db:
         photos_db[result.winner_id].is_selected = True
+    if pref_tracker and result.winner_id in photos_db and result.loser_id in photos_db:
+        try:
+            winner_stats = compute_aesthetic_score(photos_db[result.winner_id].path).get("breakdown", {})
+            loser_stats = compute_aesthetic_score(photos_db[result.loser_id].path).get("breakdown", {})
+            pref_tracker.record_choice(winner_stats, loser_stats)
+        except Exception:
+            pass
     if session_state:
         save_session(session_state, current_folder)
     get_logger().info(f"PK: {result.winner_id} beats {result.loser_id}")
@@ -482,6 +504,111 @@ def browse_directory(path: str = ""):
         if item.is_dir() and not item.name.startswith("."):
             dirs.append({"name": item.name, "path": str(item)})
     return {"current": str(target), "parent": str(target.parent), "dirs": dirs}
+
+
+@app.get("/api/preferences")
+def get_preferences():
+    if not pref_tracker:
+        return {"decisions": 0}
+    return pref_tracker.data
+
+
+@app.post("/api/auto_process")
+def auto_process(folder_path: str, filter_level: int = 60, runtime: str = "auto"):
+    global current_folder, session_state, cache_dir, runtime_preference
+    current_folder = folder_path
+    cache_dir = os.path.join(folder_path, ".photopicker_cache")
+    runtime_preference = runtime
+
+    pairs = pair_jpg_raw(folder_path)
+    raw_pair_db.clear()
+    photos_db.clear()
+    for jpg_path, pair_info in pairs.items():
+        photo_id = str(uuid.uuid4())[:8]
+        raw_path = pair_info.get("raw") if isinstance(pair_info, dict) else pair_info
+        xmp_path = pair_info.get("xmp") if isinstance(pair_info, dict) else None
+        photo = PhotoInfo(id=photo_id, path=jpg_path, raw_path=raw_path, xmp_path=xmp_path)
+        photos_db[photo_id] = photo
+        raw_pair_db[photo_id] = raw_path
+
+    for photo_id, photo in photos_db.items():
+        try:
+            import cv2
+            img = cv2.imread(photo.path)
+            if img is None:
+                continue
+            result = detect_quality_with_face(img)
+            photo.score = result["score"]
+            photo.grade = PhotoGrade(result["grade"])
+        except Exception:
+            continue
+
+    photo_paths = {pid: p.path for pid, p in photos_db.items()}
+    features = extract_phash_features(photo_paths)
+    grouped = group_by_similarity(features, 0.75)
+    groups_db.clear()
+    for group_id, photo_ids in grouped.items():
+        groups_db[group_id] = SceneGroup(
+            id=group_id, photos=photo_ids, cover_photo_id=photo_ids[0]
+        )
+        for pid in photo_ids:
+            if pid in photos_db:
+                photos_db[pid].scene_group = group_id
+
+    for gid, group in groups_db.items():
+        if len(group.photos) == 1:
+            pid = group.photos[0]
+            if pid in photos_db:
+                photos_db[pid].is_selected = True
+
+    session_state = SessionState(folder=folder_path, filter_level=filter_level)
+    save_session(session_state, folder_path)
+
+    rejected = [p for p in photos_db.values() if p.score < filter_level]
+    return {
+        "total": len(photos_db),
+        "rejected_count": len(rejected),
+        "groups_count": len(groups_db),
+        "filter_level": filter_level,
+    }
+
+
+@app.post("/api/prescreen/rescue")
+def prescreen_rescue(photo_id: str):
+    if photo_id not in photos_db:
+        raise HTTPException(404, "Photo not found")
+    photos_db[photo_id].is_rejected = False
+    return photos_db[photo_id]
+
+
+@app.post("/api/prescreen/confirm")
+def confirm_prescreen():
+    threshold = session_state.filter_level if session_state else 60
+    for p in photos_db.values():
+        if p.score < threshold:
+            p.is_rejected = True
+    return {"confirmed": True}
+
+
+@app.get("/api/final_confirm")
+def final_confirm():
+    winners = [p for p in photos_db.values() if p.is_selected]
+    losers = [p for p in photos_db.values() if p.is_rejected]
+    return {
+        "winners": len(winners),
+        "losers": len(losers),
+        "total": len(photos_db),
+    }
+
+
+@app.post("/api/export/final")
+def export_final(mode: str = "copy"):
+    winners = [p.path for p in photos_db.values() if p.is_selected]
+    losers = [p.path for p in photos_db.values() if p.is_rejected]
+    result = export_winners_losers(
+        folder=current_folder, winners=winners, losers=losers, mode=mode
+    )
+    return result
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent

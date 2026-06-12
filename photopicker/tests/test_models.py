@@ -1,4 +1,4 @@
-from photopicker.backend.models import PhotoInfo, PhotoGrade, SceneGroup, FilterLevel
+from photopicker.backend.models import PhotoInfo, PhotoGrade, SceneGroup, FilterLevel, RejectionReason, GroupState, SessionState
 
 def test_photo_info_creation():
     photo = PhotoInfo(
@@ -32,3 +32,31 @@ def test_scene_group():
     )
     assert len(group.photos) == 3
     assert group.cover_photo_id == "1"
+
+def test_rejection_reason_values():
+    assert RejectionReason.BLURRY.value == "blurry"
+    assert RejectionReason.OVEREXPOSED.value == "overexposed"
+    assert RejectionReason.CLOSED_EYES.value == "closed_eyes"
+
+def test_group_state_undo():
+    gs = GroupState(id="g1", images=["a.jpg", "b.jpg", "c.jpg"])
+    gs.left = "a.jpg"
+    gs.right = "b.jpg"
+    gs.pending = ["c.jpg"]
+    gs.save_snapshot()
+    gs.winner = "a.jpg"
+    gs.finished = True
+    gs.undo()
+    assert gs.winner is None
+    assert gs.finished is False
+
+def test_session_state_save_load():
+    state = SessionState(
+        folder="/photos",
+        groups=[GroupState(id="g1", images=["a.jpg", "b.jpg"])],
+        current_group=0
+    )
+    data = state.to_dict()
+    restored = SessionState.from_dict(data)
+    assert restored.folder == "/photos"
+    assert len(restored.groups) == 1

@@ -1,7 +1,14 @@
 <template>
   <div class="pick-view">
     <div v-if="currentGroup" class="pick-area">
-      <h3>{{ currentGroup.id }} ({{ pkIndex + 1 }}/{{ pkPairs.length }})</h3>
+      <div class="pick-header">
+        <h3>场景 {{ groupIndex + 1 }}/{{ groups.length }} — {{ currentGroup.id }} ({{ pkIndex + 1 }}/{{ pkPairs.length }})</h3>
+        <div class="pick-actions">
+          <button class="action-btn" @click="skipGroup">跳过本组 (S)</button>
+          <button class="action-btn" @click="undoPk">撤销 (Shift+Z)</button>
+          <button class="action-btn" @click="cycleZoom">缩放 {{ zoomLevel }}x (Z)</button>
+        </div>
+      </div>
       <PKBattle
         v-if="pkPairs.length > 0"
         :left="pkPairs[pkIndex][0]"
@@ -18,7 +25,7 @@
     </div>
 
     <RejectedPool :photos="rejectedPhotos" @rescue="rescuePhoto" />
-    <ZoomViewer :src="zoomSrc" :visible="zoomVisible" @close="zoomVisible = false" />
+    <ZoomViewer :visible="zoomVisible" :left-src="zoomLeftSrc" :right-src="zoomRightSrc" @close="zoomVisible = false" />
   </div>
 </template>
 
@@ -34,7 +41,10 @@ const groups = ref([])
 const groupIndex = ref(0)
 const pkIndex = ref(0)
 const zoomVisible = ref(false)
-const zoomSrc = ref('')
+const zoomLeftSrc = ref('')
+const zoomRightSrc = ref('')
+const zoomLevel = ref(1)
+const zoomLevels = [1, 2, 4]
 
 const currentGroup = computed(() => groups.value[groupIndex.value] || null)
 
@@ -80,11 +90,54 @@ async function onChoose(side) {
   await loadPhotos()
 }
 
-async function openZoom(id) {
-  const photo = getPhoto(id)
-  if (photo) {
-    zoomSrc.value = '/api/thumbnail/' + id
-    zoomVisible.value = true
+function cycleZoom() {
+  const idx = zoomLevels.indexOf(zoomLevel.value)
+  zoomLevel.value = zoomLevels[(idx + 1) % zoomLevels.length]
+}
+
+async function skipGroup() {
+  try {
+    await axios.post('/api/pk/skip')
+    groupIndex.value++
+    pkIndex.value = 0
+    await loadPhotos()
+  } catch (e) {
+    alert('跳过失败: ' + e.message)
+  }
+}
+
+async function undoPk() {
+  try {
+    await axios.post('/api/pk/undo')
+    await loadPhotos()
+    await loadGroups()
+    if (pkIndex.value > 0) {
+      pkIndex.value--
+    } else if (groupIndex.value > 0) {
+      groupIndex.value--
+      pkIndex.value = 0
+    }
+  } catch (e) {
+    alert('撤销失败: ' + e.message)
+  }
+}
+
+function openZoom(leftId, rightId) {
+  zoomLeftSrc.value = '/api/thumbnail/' + leftId
+  zoomRightSrc.value = '/api/thumbnail/' + rightId
+  zoomVisible.value = true
+}
+
+function handleKeydown(e) {
+  if (e.key === 's' || e.key === 'S') {
+    e.preventDefault()
+    skipGroup()
+  } else if (e.key === 'Z' && e.shiftKey) {
+    e.preventDefault()
+    undoPk()
+  } else if (e.key === 'z' && !e.shiftKey) {
+    e.preventDefault()
+    cycleZoom()
   }
 }
 
@@ -106,6 +159,7 @@ async function loadGroups() {
 onMounted(() => {
   loadPhotos()
   loadGroups()
+  window.addEventListener('keydown', handleKeydown)
 })
 </script>
 
@@ -114,4 +168,9 @@ onMounted(() => {
 .pick-area h3 { margin-bottom: 1rem; color: #aaa; }
 .pick-done { text-align: center; padding: 4rem 0; }
 .pick-done button { margin-top: 1.5rem; padding: 0.8rem 2rem; background: #0f3460; color: #fff; border: none; border-radius: 8px; font-size: 1.1rem; cursor: pointer; }
+.pick-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+.pick-header h3 { color: #aaa; margin: 0; }
+.pick-actions { display: flex; gap: 0.5rem; }
+.action-btn { padding: 0.4rem 0.8rem; background: #16213e; color: #aaa; border: 1px solid #333; border-radius: 6px; cursor: pointer; font-size: 0.8rem; }
+.action-btn:hover { background: #1a5276; color: #fff; }
 </style>

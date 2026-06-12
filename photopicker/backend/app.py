@@ -18,7 +18,7 @@ except ImportError:
     pass
 
 from photopicker.backend.models import (
-    PhotoInfo, PhotoGrade, SceneGroup, FilterLevel, PKResult, ExportRequest, SessionState
+    PhotoInfo, PhotoGrade, SceneGroup, FilterLevel, PKResult, ExportRequest, SessionState, GroupState
 )
 from photopicker.backend.scanner import scan_folder, pair_jpg_raw
 from photopicker.backend.grouper import group_by_similarity, extract_phash_features
@@ -333,6 +333,54 @@ def rescue_photo(photo_id: str):
     return photos_db[photo_id]
 
 
+@app.post("/api/pk/skip_pair")
+def skip_pair(photo_ids: list[str]):
+    for pid in photo_ids:
+        if pid in photos_db:
+            photos_db[pid].is_pending = True
+            photos_db[pid].is_selected = False
+            photos_db[pid].is_rejected = False
+    if session_state:
+        save_session(session_state, current_folder)
+    return {"ok": True}
+
+
+@app.get("/api/pending")
+def get_pending():
+    return [p for p in photos_db.values() if p.is_pending]
+
+
+@app.post("/api/pending/{photo_id}/select")
+def pending_select(photo_id: str):
+    if photo_id not in photos_db:
+        raise HTTPException(404)
+    photos_db[photo_id].is_pending = False
+    photos_db[photo_id].is_selected = True
+    photos_db[photo_id].is_rejected = False
+    return photos_db[photo_id]
+
+
+@app.post("/api/pending/{photo_id}/reject")
+def pending_reject(photo_id: str):
+    if photo_id not in photos_db:
+        raise HTTPException(404)
+    photos_db[photo_id].is_pending = False
+    photos_db[photo_id].is_selected = False
+    photos_db[photo_id].is_rejected = True
+    return photos_db[photo_id]
+
+
+@app.post("/api/pending/confirm")
+def pending_confirm():
+    for p in photos_db.values():
+        if p.is_pending:
+            p.is_pending = False
+            p.is_rejected = True
+    if session_state:
+        save_session(session_state, current_folder)
+    return {"ok": True}
+
+
 @app.get("/api/rejected")
 def get_rejected():
     return [p for p in photos_db.values() if p.is_rejected]
@@ -370,9 +418,14 @@ def export_selected(req: ExportRequest):
 def pk_undo():
     if not session_state:
         raise HTTPException(400, "No session")
-    current = session_state.groups[session_state.current_group] if session_state.groups else None
-    if not current:
-        raise HTTPException(400, "No current group")
+    if not session_state.groups:
+        raise HTTPException(400, "No groups in session")
+    idx = session_state.current_group
+    if idx < 0 or idx >= len(session_state.groups):
+        raise HTTPException(400, f"Invalid group index: {idx}")
+    current = session_state.groups[idx]
+    if not current.undo_stack:
+        raise HTTPException(400, "Nothing to undo")
     current.undo()
     save_session(session_state, current_folder)
     return {"ok": True}
@@ -654,7 +707,23 @@ def _run_auto_process(folder_path, filter_level, runtime):
                 if pid in photos_db:
                     photos_db[pid].is_selected = True
 
-        session_state = SessionState(folder=folder_path, filter_level=filter_level)
+        # Sync groups to session_state for undo support
+        group_states = []
+        for gid, group in groups_db.items():
+            gs = GroupState(
+                id=gid,
+                images=list(group.photos),
+            )
+            if len(group.photos) == 1:
+                gs.winner = group.photos[0]
+                gs.finished = True
+            else:
+                gs.left = group.photos[0]
+                gs.right = group.photos[1]
+                gs.pending = group.photos[2:]
+            group_states.append(gs)
+
+        session_state = SessionState(folder=folder_path, filter_level=filter_level, groups=group_states)
         save_session(session_state, folder_path)
         process_state["status"] = "done"
 
@@ -715,21 +784,21 @@ def confirm_prescreen():
 
 @app.get("/api/final_confirm")
 def final_confirm():
-    winners = [p for p in photos_db.values() if p.is_selected]
-    losers = [p for p in photos_db.values() if p.is_rejected]
+    selected = [p for p in photos_db.values() if p.is_selected]
+    rejected = [p for p in photos_db.values() if p.is_rejected]
     return {
-        "winners": len(winners),
-        "losers": len(losers),
+        "入选": len(selected),
+        "未入选": len(rejected),
         "total": len(photos_db),
     }
 
 
 @app.post("/api/export/final")
 def export_final(mode: str = "copy"):
-    winners = [p.path for p in photos_db.values() if p.is_selected]
-    losers = [p.path for p in photos_db.values() if p.is_rejected]
+    selected = [p.path for p in photos_db.values() if p.is_selected]
+    rejected = [p.path for p in photos_db.values() if p.is_rejected]
     result = export_winners_losers(
-        folder=current_folder, winners=winners, losers=losers, mode=mode
+        folder=current_folder, winners=selected, losers=rejected, mode=mode
     )
     return result
 

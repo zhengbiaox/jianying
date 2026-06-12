@@ -11,7 +11,7 @@
       <div class="quick-export">
         <p class="summary">已选 {{ selectedPhotos.length }} 张照片</p>
         <button class="quick-btn" @click="exportWinners" :disabled="exporting || selectedPhotos.length === 0">
-          {{ exporting ? '导出中...' : '导出到 winners/losers' }}
+          {{ exporting ? '导出中...' : '导出到入选/未入选文件夹' }}
         </button>
       </div>
 
@@ -30,8 +30,8 @@
 
     <div v-if="exportResult" class="export-result">
       <p>✅ 导出完成</p>
-      <p v-if="exportResult.winners_count !== undefined">入选: {{ exportResult.winners_count }} 张</p>
-      <p v-if="exportResult.losers_count !== undefined">未入选: {{ exportResult.losers_count }} 张</p>
+      <p v-if="exportResult['入选'] !== undefined">入选: {{ exportResult['入选'] }} 张</p>
+      <p v-if="exportResult['未入选'] !== undefined">未入选: {{ exportResult['未入选'] }} 张</p>
       <p v-if="exportResult.copied !== undefined">复制: {{ exportResult.copied }} 张</p>
       <p v-if="exportResult.skipped !== undefined">跳过: {{ exportResult.skipped }} 张</p>
       <p v-if="exportResult.output_dir">目录: {{ exportResult.output_dir }}</p>

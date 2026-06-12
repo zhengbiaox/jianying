@@ -72,8 +72,8 @@ def export_winners_losers(folder: str, winners: list[str], losers: list[str],
         _copy_xmp_companion(src, losers_dir, mode)
         moved += 1
     return {
-        "winners": len(winners),
-        "losers": len(losers),
+        "入选": len(winners),
+        "未入选": len(losers),
         "mode": mode,
         "winners_dir": winners_dir,
         "losers_dir": losers_dir,

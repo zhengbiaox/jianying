@@ -4,7 +4,7 @@
     <p>以下是你选出的照片，确认无误后导出</p>
 
     <div class="confirm-stats">
-      <span>胜出: <strong>{{ winners.length }}</strong> 张</span>
+      <span>入选: <strong>{{ winners.length }}</strong> 张</span>
       <span>未入选: <strong>{{ losersCount }}</strong> 张</span>
     </div>
 
@@ -28,8 +28,8 @@
 
     <div v-if="exportResult" class="export-result">
       <p>✅ 导出完成！</p>
-      <p>胜出: {{ exportResult.winners }} 张 → winners/</p>
-      <p>未入选: {{ exportResult.losers }} 张 → losers/</p>
+      <p>入选: {{ exportResult['入选'] }} 张 → winners/</p>
+      <p>未入选: {{ exportResult['未入选'] }} 张 → losers/</p>
     </div>
   </div>
 </template>

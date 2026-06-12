@@ -1,49 +1,59 @@
 <template>
   <div class="import-view">
-    <h2>选择照片文件夹</h2>
+    <h2>PhotoPicker 选片工具</h2>
 
     <div class="browser">
       <div class="browser-path">
         <span class="path-label">当前路径:</span>
         <span class="path-text">{{ currentPath }}</span>
         <button class="up-btn" @click="goUp" :disabled="!parentPath">↑ 上级</button>
-        <button class="native-btn" @click="nativePickFolder">系统选择</button>
+        <button class="native-btn" @click="nativePick">系统选择</button>
       </div>
-
-      <div v-if="folderPreview" class="folder-preview">
-        发现 {{ folderPreview.count }} 张照片，共 {{ folderPreview.size_mb }} MB
-      </div>
-
       <div class="dir-list">
-        <div
-          v-for="dir in dirs"
-          :key="dir.path"
-          class="dir-item"
-          @click="navigate(dir.path)"
-        >
+        <div v-for="dir in dirs" :key="dir.path" class="dir-item" @click="navigate(dir.path)">
           📁 {{ dir.name }}
         </div>
         <div v-if="dirs.length === 0" class="empty">此目录下没有子文件夹</div>
       </div>
-
+      <div class="folder-preview" v-if="preview">
+        <p>发现 <strong>{{ preview.count }}</strong> 张照片，共 <strong>{{ preview.size_mb }} MB</strong></p>
+      </div>
       <button class="select-btn" @click="importCurrent">
-        选择此文件夹 ({{ currentPath }})
+        选择此文件夹
       </button>
     </div>
 
-    <div v-if="resumeSession" class="resume-banner">
-      <p>发现未完成的选片任务（{{ resumeSession.total_groups }}组，已完成{{ resumeSession.current_group }}组），是否继续？</p>
-      <button class="resume-btn" @click="resumeTask">继续上次</button>
-      <button class="dismiss-btn" @click="resumeSession = null">忽略</button>
+    <div class="options">
+      <div class="option-group">
+        <label>加速方式:</label>
+        <div class="radio-group">
+          <label><input type="radio" v-model="runtime" value="auto" /> 自动</label>
+          <label><input type="radio" v-model="runtime" value="cpu" /> CPU</label>
+          <label><input type="radio" v-model="runtime" value="gpu" /> GPU</label>
+        </div>
+      </div>
+      <div class="option-group">
+        <label>筛选模式:</label>
+        <div class="radio-group">
+          <label><input type="radio" v-model="filterLevel" value="80" /> 🟢 严格</label>
+          <label><input type="radio" v-model="filterLevel" value="60" /> 🟡 适中</label>
+          <label><input type="radio" v-model="filterLevel" value="40" /> 🔴 宽松</label>
+        </div>
+      </div>
     </div>
 
-    <div v-if="importing" class="progress">
-      <p>正在扫描... 已发现 {{ count }} 张照片</p>
+    <button class="start-btn" @click="startProcess" :disabled="processing || !currentPath">
+      {{ processing ? '处理中...' : '开始整理' }}
+    </button>
+
+    <div v-if="processing" class="progress">
+      <p>正在分析照片质量和分组，请稍候...</p>
     </div>
 
-    <div v-if="done" class="done">
-      <p>✅ 导入完成，共 {{ count }} 张照片</p>
-      <button @click="$router.push('/filter')">开始初筛 →</button>
+    <div v-if="result" class="result">
+      <p>✅ 分析完成！共 {{ result.total }} 张照片</p>
+      <p>废片: {{ result.rejected_count }} 张 | 分组: {{ result.groups_count }} 组</p>
+      <button @click="$router.push('/prescreen')">进入废片审核 →</button>
     </div>
   </div>
 </template>
@@ -57,11 +67,11 @@ const router = useRouter()
 const currentPath = ref('')
 const parentPath = ref('')
 const dirs = ref([])
-const importing = ref(false)
-const done = ref(false)
-const count = ref(0)
-const resumeSession = ref(null)
-const folderPreview = ref(null)
+const preview = ref(null)
+const runtime = ref('auto')
+const filterLevel = ref('60')
+const processing = ref(false)
+const result = ref(null)
 
 async function browse(path = '') {
   try {
@@ -69,112 +79,84 @@ async function browse(path = '') {
     currentPath.value = res.data.current
     parentPath.value = res.data.parent
     dirs.value = res.data.dirs
-    previewFolder(res.data.current)
+    preview.value = null
+    if (currentPath.value) {
+      try {
+        const pv = await axios.post('/api/preview_folder', null, { params: { folder_path: currentPath.value } })
+        preview.value = pv.data
+      } catch {}
+    }
   } catch (e) {
     alert('无法读取目录: ' + e.message)
   }
 }
 
-async function previewFolder(path) {
-  try {
-    const res = await axios.post('/api/preview_folder', null, { params: { folder_path: path } })
-    folderPreview.value = res.data
-  } catch (e) {
-    folderPreview.value = null
-  }
-}
+function navigate(path) { browse(path) }
+function goUp() { if (parentPath.value) browse(parentPath.value) }
 
-function navigate(path) {
-  browse(path)
-}
-
-function goUp() {
-  if (parentPath.value) {
-    browse(parentPath.value)
-  }
-}
-
-async function nativePickFolder() {
+async function nativePick() {
   try {
     const res = await axios.post('/api/browse_folder')
-    if (res.data.error) {
-      alert('系统选择失败: ' + res.data.error)
-      return
+    if (res.data.ok && res.data.folder) {
+      browse(res.data.folder)
     }
-    if (res.data.cancelled) {
-      return
-    }
-    browse(res.data.folder)
   } catch (e) {
-    alert('系统选择失败: ' + e.message)
+    alert('选择失败: ' + e.message)
   }
 }
 
-async function importCurrent() {
-  importing.value = true
-  done.value = false
+function importCurrent() {
+  // Just select, don't process yet
+}
+
+async function startProcess() {
+  if (!currentPath.value) return
+  processing.value = true
+  result.value = null
   try {
-    const res = await axios.post('/api/import', null, {
-      params: { folder_path: currentPath.value }
+    const res = await axios.post('/api/auto_process', null, {
+      params: {
+        folder_path: currentPath.value,
+        filter_level: parseInt(filterLevel.value),
+        runtime: runtime.value,
+      }
     })
-    count.value = res.data.count
-    done.value = true
+    result.value = res.data
   } catch (e) {
-    alert('导入失败: ' + e.message)
+    alert('处理失败: ' + e.message)
   } finally {
-    importing.value = false
+    processing.value = false
   }
 }
 
-async function checkSession() {
-  try {
-    const res = await axios.get('/api/state')
-    if (res.data.has_session) {
-      resumeSession.value = res.data
-    }
-  } catch (e) {
-    // no session or error, ignore
-  }
-}
-
-async function resumeTask() {
-  try {
-    await axios.post('/api/state/resume', { folder_path: currentPath.value || resumeSession.value.folder_path || '' })
-    router.push('/filter')
-  } catch (e) {
-    alert('恢复失败: ' + e.message)
-  }
-}
-
-onMounted(() => {
-  browse()
-  checkSession()
-})
+onMounted(() => browse())
 </script>
 
 <style scoped>
 .import-view { padding: 1.5rem 2rem; max-width: 700px; margin: 0 auto; }
-.import-view h2 { margin-bottom: 1.5rem; }
-.browser { background: #16213e; border-radius: 12px; padding: 1rem; }
+.import-view h2 { margin-bottom: 1.5rem; text-align: center; }
+.browser { background: #16213e; border-radius: 12px; padding: 1rem; margin-bottom: 1rem; }
 .browser-path { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; padding-bottom: 0.8rem; border-bottom: 1px solid #333; }
 .path-label { color: #888; font-size: 0.85rem; }
 .path-text { color: #eee; flex: 1; font-size: 0.9rem; word-break: break-all; }
-.up-btn { padding: 0.3rem 0.8rem; background: #333; color: #aaa; border: none; border-radius: 6px; cursor: pointer; }
+.up-btn, .native-btn { padding: 0.3rem 0.8rem; background: #333; color: #aaa; border: none; border-radius: 6px; cursor: pointer; }
 .up-btn:disabled { opacity: 0.3; cursor: not-allowed; }
-.native-btn { padding: 0.3rem 0.8rem; background: #0f3460; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
-.native-btn:hover { background: #1a5276; }
-.folder-preview { padding: 0.6rem 1rem; background: #0a1628; border-radius: 8px; color: #4caf50; font-size: 0.9rem; margin-bottom: 1rem; }
-.dir-list { max-height: 400px; overflow-y: auto; margin-bottom: 1rem; }
+.dir-list { max-height: 300px; overflow-y: auto; margin-bottom: 0.5rem; }
 .dir-item { padding: 0.5rem 0.8rem; cursor: pointer; border-radius: 6px; transition: background 0.15s; }
 .dir-item:hover { background: rgba(15,52,96,0.4); }
 .empty { color: #666; padding: 1rem; text-align: center; }
-.select-btn { width: 100%; padding: 0.8rem; background: #0f3460; color: #fff; border: none; border-radius: 8px; font-size: 1rem; cursor: pointer; }
-.select-btn:hover { background: #1a5276; }
-.done { margin-top: 2rem; text-align: center; background: #16213e; padding: 1.5rem; border-radius: 12px; }
-.done button { margin-top: 1rem; padding: 0.8rem 2rem; background: #0f3460; color: #fff; border: none; border-radius: 8px; font-size: 1.1rem; cursor: pointer; }
-.progress { margin-top: 1.5rem; text-align: center; color: #aaa; }
-.resume-banner { margin-top: 1.5rem; padding: 1rem 1.5rem; background: #2d1b00; border: 1px solid #ff9800; border-radius: 12px; display: flex; align-items: center; gap: 1rem; }
-.resume-banner p { flex: 1; color: #ffcc80; margin: 0; }
-.resume-btn { padding: 0.5rem 1.2rem; background: #ff9800; color: #000; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
-.dismiss-btn { padding: 0.5rem 1.2rem; background: #333; color: #aaa; border: none; border-radius: 6px; cursor: pointer; }
+.folder-preview { padding: 0.5rem; background: #0f3460; border-radius: 6px; margin-bottom: 0.5rem; text-align: center; }
+.folder-preview strong { color: #4caf50; }
+.select-btn { width: 100%; padding: 0.6rem; background: #333; color: #aaa; border: none; border-radius: 8px; cursor: pointer; margin-bottom: 1rem; }
+.options { background: #16213e; border-radius: 12px; padding: 1rem; margin-bottom: 1rem; }
+.option-group { margin-bottom: 0.8rem; }
+.option-group label { color: #aaa; font-size: 0.9rem; display: block; margin-bottom: 0.3rem; }
+.radio-group { display: flex; gap: 1rem; }
+.radio-group label { color: #eee; cursor: pointer; display: flex; align-items: center; gap: 0.3rem; }
+.start-btn { width: 100%; padding: 1rem; background: #0f3460; color: #fff; border: none; border-radius: 12px; font-size: 1.2rem; cursor: pointer; }
+.start-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.start-btn:hover:not(:disabled) { background: #1a5276; }
+.progress { text-align: center; margin-top: 1rem; color: #aaa; }
+.result { text-align: center; margin-top: 1.5rem; background: #16213e; padding: 1.5rem; border-radius: 12px; }
+.result button { margin-top: 1rem; padding: 0.8rem 2rem; background: #0f3460; color: #fff; border: none; border-radius: 8px; font-size: 1.1rem; cursor: pointer; }
 </style>

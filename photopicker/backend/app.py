@@ -27,6 +27,7 @@ from photopicker.backend.state import save_session, load_session
 from photopicker.backend.cache import get_thumbnail as get_cached_thumbnail
 from photopicker.backend.runtime import get_device, device_info
 from photopicker.backend.logger import setup_logger, get_logger
+from photopicker.backend.watermark import add_watermark, batch_watermark, read_exif
 
 app = FastAPI(title="PhotoPicker")
 
@@ -381,6 +382,25 @@ def export_winners(mode: str = "copy"):
     result = export_winners_losers(
         folder=current_folder, winners=winners, losers=losers, mode=mode
     )
+    return result
+
+
+@app.get("/api/watermark/preview")
+def watermark_preview(photo_id: str):
+    if photo_id not in photos_db:
+        raise HTTPException(404, "Photo not found")
+    photo = photos_db[photo_id]
+    exif = read_exif(photo.path)
+    return {"exif": exif}
+
+
+@app.post("/api/watermark/batch")
+def watermark_batch(style: str = "standard"):
+    selected = [p.path for p in photos_db.values() if p.is_selected]
+    if not selected:
+        raise HTTPException(400, "No selected photos")
+    output_dir = os.path.join(current_folder, "watermarked")
+    result = batch_watermark(selected, output_dir, style)
     return result
 
 

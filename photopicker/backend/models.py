@@ -23,6 +23,8 @@ class PhotoInfo(BaseModel):
     scene_group: Optional[str] = None
     is_selected: bool = False
     is_rejected: bool = False
+    aesthetic_score: int = 0
+    reasons: list[str] = []
 
 class SceneGroup(BaseModel):
     id: str

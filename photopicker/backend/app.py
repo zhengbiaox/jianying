@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -31,6 +32,24 @@ from photopicker.backend.watermark import add_watermark, batch_watermark, read_e
 from photopicker.backend.aesthetic import compute_aesthetic_score
 from photopicker.backend.preferences import PreferenceTracker
 
+REASON_CN = {
+    "blurry": "模糊",
+    "very_blurry": "严重模糊",
+    "subject_blurry": "主体模糊",
+    "motion_blur": "运动模糊",
+    "overexposed": "过曝",
+    "underexposed": "欠曝",
+    "closed_eyes": "闭眼",
+    "shake": "抖动",
+    "low_quality": "质量不达标",
+    "horizon_tilt": "地平线歪斜",
+    "horizon_severe": "严重歪斜",
+    "low_contrast": "低对比度",
+    "low_information": "信息量不足",
+    "too_small": "图片太小",
+    "tiny_file": "文件太小",
+}
+
 app = FastAPI(title="PhotoPicker")
 
 app.add_middleware(
@@ -52,6 +71,17 @@ runtime_preference = "auto"
 
 progress_state = {"status": "idle", "done": 0, "total": 0, "label": ""}
 pref_tracker: PreferenceTracker | None = None
+
+process_state = {
+    "status": "idle",
+    "done": 0,
+    "total": 0,
+    "current_photo": "",
+    "rejected_count": 0,
+    "groups_count": 0,
+    "events": [],
+}
+process_cancel = threading.Event()
 
 BROKEN_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 360"><rect width="100%" height="100%" fill="#1a1a2e"/><text x="50%" y="50%" text-anchor="middle" font-family="sans-serif" font-size="20" fill="#666">Error</text></svg>'.encode("utf-8")
 
@@ -513,64 +543,146 @@ def get_preferences():
     return pref_tracker.data
 
 
+def _run_auto_process(folder_path, filter_level, runtime):
+    # READ-ONLY GUARANTEE: This function only reads files and updates in-memory state.
+    # No files are moved, copied, or modified until /api/export/final is called.
+    global session_state, cache_dir, current_folder, runtime_preference
+    try:
+        process_state["status"] = "running"
+        process_state["done"] = 0
+        process_state["events"] = []
+        process_state["rejected_count"] = 0
+        process_state["groups_count"] = 0
+
+        current_folder = folder_path
+        cache_dir = os.path.join(folder_path, ".photopicker_cache")
+        runtime_preference = runtime
+
+        pairs = pair_jpg_raw(folder_path)
+        raw_pair_db.clear()
+        photos_db.clear()
+
+        photo_list = []
+        for jpg_path, pair_info in pairs.items():
+            if process_cancel.is_set():
+                process_state["status"] = "stopped"
+                return
+            photo_id = str(uuid.uuid4())[:8]
+            raw_path = pair_info.get("raw") if isinstance(pair_info, dict) else pair_info
+            xmp_path = pair_info.get("xmp") if isinstance(pair_info, dict) else None
+            photo = PhotoInfo(id=photo_id, path=jpg_path, raw_path=raw_path, xmp_path=xmp_path)
+            photos_db[photo_id] = photo
+            raw_pair_db[photo_id] = raw_path
+            photo_list.append((photo_id, jpg_path))
+
+        process_state["total"] = len(photo_list)
+
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def detect_one(args):
+            photo_id, path = args
+            try:
+                img = cv2.imread(path)
+                if img is None:
+                    return photo_id, None
+                result = detect_quality_with_face(img)
+                return photo_id, result
+            except Exception:
+                return photo_id, None
+
+        import cv2
+        workers = min(8, max(2, (os.cpu_count() or 4)))
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {
+                executor.submit(detect_one, (pid, path)): pid
+                for pid, path in photo_list
+            }
+            for future in as_completed(futures):
+                if process_cancel.is_set():
+                    process_state["status"] = "stopped"
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    return
+
+                photo_id, result = future.result()
+                process_state["done"] += 1
+
+                if result:
+                    photos_db[photo_id].score = result["score"]
+                    photos_db[photo_id].grade = PhotoGrade(result["grade"])
+                    photos_db[photo_id].reasons = [REASON_CN.get(r, r) for r in result.get("reasons", [])]
+
+                    rejected = result["score"] < filter_level
+                    process_state["events"].append({
+                        "id": photo_id,
+                        "name": os.path.basename(photos_db[photo_id].path),
+                        "score": result["score"],
+                        "rejected": rejected,
+                        "reasons": photos_db[photo_id].reasons,
+                    })
+
+                    if rejected:
+                        process_state["rejected_count"] += 1
+
+        if not process_cancel.is_set():
+            photo_paths = {pid: p.path for pid, p in photos_db.items()}
+            features = extract_phash_features(photo_paths)
+            grouped = group_by_similarity(features, 0.75)
+            groups_db.clear()
+            for group_id, photo_ids in grouped.items():
+                groups_db[group_id] = SceneGroup(
+                    id=group_id, photos=photo_ids, cover_photo_id=photo_ids[0]
+                )
+                for pid in photo_ids:
+                    if pid in photos_db:
+                        photos_db[pid].scene_group = group_id
+            process_state["groups_count"] = len(groups_db)
+
+        for gid, group in groups_db.items():
+            if len(group.photos) == 1:
+                pid = group.photos[0]
+                if pid in photos_db:
+                    photos_db[pid].is_selected = True
+
+        session_state = SessionState(folder=folder_path, filter_level=filter_level)
+        save_session(session_state, folder_path)
+        process_state["status"] = "done"
+
+    except Exception as e:
+        process_state["status"] = "error"
+        process_state["error"] = str(e)
+
+
 @app.post("/api/auto_process")
 def auto_process(folder_path: str, filter_level: int = 60, runtime: str = "auto"):
-    global current_folder, session_state, cache_dir, runtime_preference
-    current_folder = folder_path
+    global cache_dir
+    if process_state["status"] == "running":
+        raise HTTPException(400, "Already running")
+
+    process_cancel.clear()
     cache_dir = os.path.join(folder_path, ".photopicker_cache")
-    runtime_preference = runtime
+    process_state["status"] = "starting"
+    process_state["rejected_count"] = 0
+    process_state["groups_count"] = 0
+    process_state["events"] = []
 
-    pairs = pair_jpg_raw(folder_path)
-    raw_pair_db.clear()
-    photos_db.clear()
-    for jpg_path, pair_info in pairs.items():
-        photo_id = str(uuid.uuid4())[:8]
-        raw_path = pair_info.get("raw") if isinstance(pair_info, dict) else pair_info
-        xmp_path = pair_info.get("xmp") if isinstance(pair_info, dict) else None
-        photo = PhotoInfo(id=photo_id, path=jpg_path, raw_path=raw_path, xmp_path=xmp_path)
-        photos_db[photo_id] = photo
-        raw_pair_db[photo_id] = raw_path
+    thread = threading.Thread(
+        target=_run_auto_process,
+        args=(folder_path, filter_level, runtime),
+        daemon=True
+    )
+    thread.start()
+    return {"status": "started"}
 
-    for photo_id, photo in photos_db.items():
-        try:
-            import cv2
-            img = cv2.imread(photo.path)
-            if img is None:
-                continue
-            result = detect_quality_with_face(img)
-            photo.score = result["score"]
-            photo.grade = PhotoGrade(result["grade"])
-        except Exception:
-            continue
 
-    photo_paths = {pid: p.path for pid, p in photos_db.items()}
-    features = extract_phash_features(photo_paths)
-    grouped = group_by_similarity(features, 0.75)
-    groups_db.clear()
-    for group_id, photo_ids in grouped.items():
-        groups_db[group_id] = SceneGroup(
-            id=group_id, photos=photo_ids, cover_photo_id=photo_ids[0]
-        )
-        for pid in photo_ids:
-            if pid in photos_db:
-                photos_db[pid].scene_group = group_id
+@app.post("/api/auto_process/stop")
+def stop_auto_process():
+    process_cancel.set()
+    return {"status": "stopping"}
 
-    for gid, group in groups_db.items():
-        if len(group.photos) == 1:
-            pid = group.photos[0]
-            if pid in photos_db:
-                photos_db[pid].is_selected = True
 
-    session_state = SessionState(folder=folder_path, filter_level=filter_level)
-    save_session(session_state, folder_path)
-
-    rejected = [p for p in photos_db.values() if p.score < filter_level]
-    return {
-        "total": len(photos_db),
-        "rejected_count": len(rejected),
-        "groups_count": len(groups_db),
-        "filter_level": filter_level,
-    }
+@app.get("/api/auto_process/status")
+def get_process_status():
+    return process_state
 
 
 @app.post("/api/prescreen/rescue")

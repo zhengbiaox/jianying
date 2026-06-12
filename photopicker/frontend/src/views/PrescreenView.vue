@@ -49,11 +49,7 @@ const rejectedPhotos = computed(() => photos.value.filter(p => p.score < 60))
 const rescuedCount = computed(() => rescuedIds.value.size)
 
 function getReasons(photo) {
-  const reasons = []
-  if (photo.score < 30) reasons.push('严重模糊')
-  else if (photo.score < 50) reasons.push('模糊')
-  if (photo.score < 40) reasons.push('曝光问题')
-  return reasons.length ? reasons : ['质量不达标']
+  return photo.reasons && photo.reasons.length ? photo.reasons : ['质量不达标']
 }
 
 async function rescue(id) {

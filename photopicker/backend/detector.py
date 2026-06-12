@@ -43,3 +43,30 @@ def score_to_grade(score: int, threshold: int = 60) -> PhotoGrade:
         return PhotoGrade.YELLOW
     else:
         return PhotoGrade.RED
+
+def detect_quality_with_reasons(img: np.ndarray) -> dict:
+    reasons = []
+    score = 100
+    sharpness = detect_blur(img)
+    exposure = detect_exposure(img)
+    shake = detect_shake(img)
+    if sharpness < 50:
+        reasons.append("blurry")
+        score -= 25
+    if exposure["overexposed"]:
+        reasons.append("overexposed")
+        score -= 20
+    if exposure["underexposed"]:
+        reasons.append("underexposed")
+        score -= 20
+    if shake:
+        reasons.append("shake")
+        score -= 15
+    score = max(0, min(100, score))
+    grade = score_to_grade(score)
+    return {
+        "score": score,
+        "grade": grade.value,
+        "reasons": reasons,
+        "sharpness": sharpness,
+    }

@@ -1,6 +1,6 @@
 import numpy as np
 import cv2
-from photopicker.backend.detector import detect_blur, detect_exposure, calculate_score, detect_quality_with_reasons
+from photopicker.backend.detector import detect_blur, detect_exposure, calculate_score, detect_quality_with_reasons, detect_faces, detect_quality_with_face
 
 def test_detect_blur_sharp():
     img = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
@@ -42,3 +42,15 @@ def test_detect_quality_normal():
     result = detect_quality_with_reasons(img)
     assert isinstance(result["score"], int)
     assert isinstance(result["reasons"], list)
+
+def test_detect_faces_returns_list():
+    img = np.random.randint(0, 255, (200, 200, 3), dtype=np.uint8)
+    faces = detect_faces(img)
+    assert isinstance(faces, list)
+
+def test_detect_quality_with_face():
+    img = np.random.randint(80, 180, (200, 200, 3), dtype=np.uint8)
+    result = detect_quality_with_face(img)
+    assert "faces" in result
+    assert "face_count" in result
+    assert isinstance(result["score"], int)

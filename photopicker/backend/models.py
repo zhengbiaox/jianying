@@ -16,6 +16,7 @@ class PhotoInfo(BaseModel):
     id: str
     path: str
     raw_path: Optional[str] = None
+    xmp_path: Optional[str] = None
     thumbnail_path: Optional[str] = None
     score: int = 0
     grade: PhotoGrade = PhotoGrade.RED

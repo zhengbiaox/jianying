@@ -13,14 +13,18 @@ def test_scan_folder_finds_images():
 
 def test_pair_jpg_raw_by_name():
     with tempfile.TemporaryDirectory() as tmpdir:
-        open(os.path.join(tmpdir, "img001.jpg"), "w").close()
-        open(os.path.join(tmpdir, "img001.ARW"), "w").close()
-        open(os.path.join(tmpdir, "img002.jpg"), "w").close()
+        jpg1 = os.path.join(tmpdir, "img001.jpg")
+        raw1 = os.path.join(tmpdir, "img001.ARW")
+        jpg2 = os.path.join(tmpdir, "img002.jpg")
+        open(jpg1, "w").close()
+        open(raw1, "w").close()
+        open(jpg2, "w").close()
         pairs = pair_jpg_raw(tmpdir)
-        assert "img001.jpg" in pairs
-        assert pairs["img001.jpg"] == "img001.ARW"
-        assert "img002.jpg" in pairs
-        assert pairs["img002.jpg"] is None
+        assert jpg1 in pairs
+        assert pairs[jpg1]["raw"] == raw1
+        assert pairs[jpg1]["xmp"] is None
+        assert jpg2 in pairs
+        assert pairs[jpg2]["raw"] is None
 
 
 def test_scan_recursive():

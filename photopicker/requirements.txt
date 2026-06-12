@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+opencv-python-headless
+Pillow
+pillow-heif
+mediapipe
+open-clip-torch
+torch
+torchvision
+rawpy
+numpy
+scikit-learn

@@ -1,11 +1,20 @@
 import os
+import subprocess
+import sys
+import time
 import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
+
+try:
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+except ImportError:
+    pass
 
 from photopicker.backend.models import (
     PhotoInfo, PhotoGrade, SceneGroup, FilterLevel, PKResult, ExportRequest, SessionState
@@ -37,6 +46,13 @@ session_state: SessionState | None = None
 cache_dir: str = ""
 runtime_preference = "auto"
 
+progress_state = {"status": "idle", "done": 0, "total": 0, "label": ""}
+
+BROKEN_SVG = b'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 360">
+<rect width="100%" height="100%" fill="#1a1a2e"/>
+<text x="50%" y="50%" text-anchor="middle" font-family="sans-serif" font-size="20" fill="#666">无法读取</text>
+</svg>'''
+
 
 def _load_clip():
     global clip_model, clip_preprocess
@@ -66,15 +82,16 @@ def import_folder(folder_path: str):
     pairs = pair_jpg_raw(folder_path)
     raw_pair_db.clear()
     photos_db.clear()
-    for jpg_path, raw_path in pairs.items():
+    for jpg_path, pair_info in pairs.items():
         photo_id = str(uuid.uuid4())[:8]
         photo = PhotoInfo(
             id=photo_id,
             path=jpg_path,
-            raw_path=raw_path,
+            raw_path=pair_info["raw"],
+            xmp_path=pair_info["xmp"],
         )
         photos_db[photo_id] = photo
-        raw_pair_db[photo_id] = raw_path
+        raw_pair_db[photo_id] = pair_info["raw"]
     session_state = SessionState(folder=folder_path)
     save_session(session_state, folder_path)
     return {"count": len(photos_db), "message": "Import complete"}
@@ -102,25 +119,35 @@ def get_thumbnail(photo_id: str):
     if photo_id not in photos_db:
         raise HTTPException(status_code=404, detail="Photo not found")
     photo = photos_db[photo_id]
-    if cache_dir:
-        cached_path = get_cached_thumbnail(photo.path, cache_dir)
-        return FileResponse(cached_path, media_type="image/jpeg")
-    return FileResponse(photo.path, media_type="image/jpeg")
+    try:
+        if cache_dir:
+            cached_path = get_cached_thumbnail(photo.path, cache_dir)
+            return FileResponse(cached_path, media_type="image/jpeg")
+        return FileResponse(photo.path, media_type="image/jpeg")
+    except Exception:
+        return Response(content=BROKEN_SVG, media_type="image/svg+xml")
 
 
 @app.post("/api/detect")
 def run_detection():
+    progress_state["status"] = "detecting"
+    progress_state["done"] = 0
+    progress_state["total"] = len(photos_db)
+    progress_state["label"] = "检测中"
     for photo_id, photo in photos_db.items():
         try:
             import cv2
             img = cv2.imread(photo.path)
             if img is None:
+                progress_state["done"] += 1
                 continue
             result = detect_quality_with_face(img)
             photo.score = result["score"]
             photo.grade = PhotoGrade(result["grade"])
         except Exception:
-            continue
+            pass
+        progress_state["done"] += 1
+    progress_state["status"] = "done"
     if session_state:
         save_session(session_state, current_folder)
     return {"detected": len(photos_db)}
@@ -131,6 +158,11 @@ def run_grouping(threshold: float = 0.75):
     global session_state
     groups_db.clear()
     features = {}
+
+    progress_state["status"] = "grouping"
+    progress_state["done"] = 0
+    progress_state["total"] = len(photos_db)
+    progress_state["label"] = "分组中"
 
     use_clip = _load_clip()
 
@@ -148,11 +180,13 @@ def run_grouping(threshold: float = 0.75):
                     feat = feat / feat.norm(dim=-1, keepdim=True)
                 features[photo_id] = feat.squeeze().cpu().numpy()
             except Exception:
-                continue
+                pass
+            progress_state["done"] += 1
         print(f"CLIP: extracted features for {len(features)} photos")
     else:
         photo_paths = {pid: p.path for pid, p in photos_db.items()}
         features = extract_phash_features(photo_paths)
+        progress_state["done"] = len(photos_db)
         print(f"pHash: extracted features for {len(features)} photos")
 
     grouped = group_by_similarity(features, threshold)
@@ -182,6 +216,7 @@ def run_grouping(threshold: float = 0.75):
         session_state.threshold = threshold
         save_session(session_state, current_folder)
 
+    progress_state["status"] = "done"
     return {"groups": len(groups_db), "method": "clip" if use_clip else "phash"}
 
 
@@ -259,7 +294,8 @@ def export_selected(req: ExportRequest):
     selected_photos = [photos_db[pid] for pid in req.photo_ids if pid in photos_db]
     photo_paths = [p.path for p in selected_photos]
     raw_paths = {p.path: p.raw_path for p in selected_photos if p.raw_path}
-    result = export_photos(photo_paths, raw_paths, req.output_dir, req.folder_name)
+    xmp_paths = {p.path: p.xmp_path for p in selected_photos if p.xmp_path}
+    result = export_photos(photo_paths, raw_paths, req.output_dir, req.folder_name, xmp_paths)
     return result
 
 
@@ -321,9 +357,9 @@ def resume_state(folder_path: str):
     cache_dir = os.path.join(folder_path, ".photopicker_cache")
     pairs = pair_jpg_raw(folder_path)
     photos_db.clear()
-    for jpg_path, raw_path in pairs.items():
+    for jpg_path, pair_info in pairs.items():
         photo_id = str(uuid.uuid4())[:8]
-        photo = PhotoInfo(id=photo_id, path=jpg_path, raw_path=raw_path)
+        photo = PhotoInfo(id=photo_id, path=jpg_path, raw_path=pair_info["raw"], xmp_path=pair_info["xmp"])
         photos_db[photo_id] = photo
     return {"resumed": True, "current_group": session_state.current_group}
 
@@ -357,6 +393,58 @@ def set_runtime(preference: str = "auto"):
     runtime_preference = preference
     device = get_device(preference)
     return {"preference": preference, "device": device}
+
+
+@app.get("/api/progress")
+def get_progress():
+    return progress_state
+
+
+@app.post("/api/browse_folder")
+def browse_folder_native():
+    try:
+        if sys.platform == "darwin":
+            script = 'tell application "System Events" to activate\nset chosen to POSIX path of (choose folder with prompt "选择照片文件夹")\nreturn chosen'
+            proc = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=120)
+            if proc.returncode != 0:
+                return {"ok": True, "cancelled": True}
+            return {"ok": True, "folder": proc.stdout.strip().rstrip("/")}
+        elif sys.platform == "win32":
+            import tkinter
+            from tkinter import filedialog
+            root = tkinter.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            chosen = filedialog.askdirectory(title="选择照片文件夹")
+            root.destroy()
+            if not chosen:
+                return {"ok": True, "cancelled": True}
+            return {"ok": True, "folder": chosen}
+        else:
+            proc = subprocess.run(["zenity", "--file-selection", "--directory"], capture_output=True, text=True, timeout=120)
+            if proc.returncode != 0:
+                return {"ok": True, "cancelled": True}
+            return {"ok": True, "folder": proc.stdout.strip()}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/preview_folder")
+def preview_folder(folder_path: str):
+    p = Path(folder_path)
+    if not p.exists():
+        raise HTTPException(404, "Folder not found")
+    count = 0
+    total_size = 0
+    for f in p.rglob("*"):
+        if f.is_file() and f.suffix.lower() in {".jpg", ".jpeg", ".png", ".arw", ".cr3", ".nef", ".raf", ".dng"}:
+            count += 1
+            total_size += f.stat().st_size
+    return {
+        "count": count,
+        "size_mb": round(total_size / 1024 / 1024, 1),
+        "path": str(p)
+    }
 
 
 @app.get("/api/browse")

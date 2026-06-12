@@ -26,12 +26,13 @@ from photopicker.backend.exporter import export_photos, export_winners_losers
 from photopicker.backend.state import save_session, load_session
 from photopicker.backend.cache import get_thumbnail as get_cached_thumbnail
 from photopicker.backend.runtime import get_device, device_info
+from photopicker.backend.logger import setup_logger, get_logger
 
 app = FastAPI(title="PhotoPicker")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://127.0.0.1:8010", "http://localhost:8010", "http://127.0.0.1:8000", "http://localhost:8000"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -48,10 +49,7 @@ runtime_preference = "auto"
 
 progress_state = {"status": "idle", "done": 0, "total": 0, "label": ""}
 
-BROKEN_SVG = b'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 360">
-<rect width="100%" height="100%" fill="#1a1a2e"/>
-<text x="50%" y="50%" text-anchor="middle" font-family="sans-serif" font-size="20" fill="#666">无法读取</text>
-</svg>'''
+BROKEN_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 360"><rect width="100%" height="100%" fill="#1a1a2e"/><text x="50%" y="50%" text-anchor="middle" font-family="sans-serif" font-size="20" fill="#666">Error</text></svg>'.encode("utf-8")
 
 
 def _load_clip():
@@ -79,6 +77,7 @@ def import_folder(folder_path: str):
     global current_folder, clip_model, session_state, cache_dir
     current_folder = folder_path
     cache_dir = os.path.join(folder_path, ".photopicker_cache")
+    setup_logger(folder_path)
     pairs = pair_jpg_raw(folder_path)
     raw_pair_db.clear()
     photos_db.clear()
@@ -134,6 +133,7 @@ def run_detection():
     progress_state["done"] = 0
     progress_state["total"] = len(photos_db)
     progress_state["label"] = "检测中"
+    get_logger().info(f"Starting detection for {len(photos_db)} photos")
     for photo_id, photo in photos_db.items():
         try:
             import cv2
@@ -163,6 +163,7 @@ def run_grouping(threshold: float = 0.75):
     progress_state["done"] = 0
     progress_state["total"] = len(photos_db)
     progress_state["label"] = "分组中"
+    get_logger().info(f"Starting grouping with threshold {threshold}")
 
     use_clip = _load_clip()
 
@@ -238,6 +239,7 @@ def submit_pk(result: PKResult):
         photos_db[result.winner_id].is_selected = True
     if session_state:
         save_session(session_state, current_folder)
+    get_logger().info(f"PK: {result.winner_id} beats {result.loser_id}")
     return {"ok": True}
 
 
@@ -296,6 +298,7 @@ def export_selected(req: ExportRequest):
     raw_paths = {p.path: p.raw_path for p in selected_photos if p.raw_path}
     xmp_paths = {p.path: p.xmp_path for p in selected_photos if p.xmp_path}
     result = export_photos(photo_paths, raw_paths, req.output_dir, req.folder_name, xmp_paths)
+    get_logger().info(f"Exported {len(selected_photos)} photos to {req.output_dir}/{req.folder_name}")
     return result
 
 

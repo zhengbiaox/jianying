@@ -2,7 +2,7 @@
   <div id="app">
     <nav class="top-nav">
       <router-link to="/import">首页</router-link>
-      <router-link to="/prescreen">废片审核</router-link>
+      <router-link to="/prescreen">照片筛选</router-link>
       <router-link to="/pick">PK选片</router-link>
       <router-link to="/confirm">最终确认</router-link>
     </nav>

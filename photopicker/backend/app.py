@@ -33,21 +33,21 @@ from photopicker.backend.aesthetic import compute_aesthetic_score
 from photopicker.backend.preferences import PreferenceTracker
 
 REASON_CN = {
-    "blurry": "模糊",
-    "very_blurry": "严重模糊",
-    "subject_blurry": "主体模糊",
-    "motion_blur": "运动模糊",
-    "overexposed": "过曝",
-    "underexposed": "欠曝",
-    "closed_eyes": "闭眼",
-    "shake": "抖动",
-    "low_quality": "质量不达标",
-    "horizon_tilt": "地平线歪斜",
-    "horizon_severe": "严重歪斜",
-    "low_contrast": "低对比度",
-    "low_information": "信息量不足",
-    "too_small": "图片太小",
-    "tiny_file": "文件太小",
+    "blurry": "清晰度不足",
+    "very_blurry": "画面较模糊",
+    "subject_blurry": "主体不够清晰",
+    "motion_blur": "拍摄时抖动",
+    "overexposed": "高光过亮",
+    "underexposed": "暗部偏暗",
+    "closed_eyes": "眼睛未睁开",
+    "shake": "手持不稳",
+    "low_quality": "画质有待提升",
+    "horizon_tilt": "水平线稍有倾斜",
+    "horizon_severe": "水平线明显倾斜",
+    "low_contrast": "对比度偏低",
+    "low_information": "画面内容较少",
+    "too_small": "分辨率偏低",
+    "tiny_file": "文件体积偏小",
 }
 
 app = FastAPI(title="PhotoPicker")
@@ -157,6 +157,17 @@ def get_thumbnail(photo_id: str):
         if cache_dir:
             cached_path = get_cached_thumbnail(photo.path, cache_dir)
             return FileResponse(cached_path, media_type="image/jpeg")
+        return FileResponse(photo.path, media_type="image/jpeg")
+    except Exception:
+        return Response(content=BROKEN_SVG, media_type="image/svg+xml")
+
+
+@app.get("/api/preview/{photo_id}")
+def get_preview(photo_id: str):
+    if photo_id not in photos_db:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    photo = photos_db[photo_id]
+    try:
         return FileResponse(photo.path, media_type="image/jpeg")
     except Exception:
         return Response(content=BROKEN_SVG, media_type="image/svg+xml")

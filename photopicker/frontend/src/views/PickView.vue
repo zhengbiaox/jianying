@@ -21,7 +21,7 @@
     <div v-else class="pick-done">
       <h3>✅ 所有场景PK完成</h3>
       <p>已选 {{ selectedCount }} 张照片</p>
-      <button @click="$router.push('/export')">去导出 →</button>
+      <button @click="$router.push('/confirm')">去导出 →</button>
     </div>
 
     <RejectedPool :photos="rejectedPhotos" @rescue="rescuePhoto" />
@@ -123,8 +123,8 @@ async function undoPk() {
 }
 
 function openZoom(leftId, rightId) {
-  zoomLeftSrc.value = '/api/thumbnail/' + leftId
-  zoomRightSrc.value = '/api/thumbnail/' + rightId
+  zoomLeftSrc.value = '/api/preview/' + leftId
+  zoomRightSrc.value = '/api/preview/' + rightId
   zoomVisible.value = true
 }
 

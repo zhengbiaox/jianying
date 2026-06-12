@@ -1,17 +1,17 @@
 <template>
   <div class="pk-battle">
     <div class="pk-side" :class="{ winner: selectedSide === 'left' }">
-      <img :src="'/api/thumbnail/' + left.id" @click="$emit('zoom', left.id, right.id)" />
+      <img :src="'/api/preview/' + left.id" @click="$emit('zoom', left.id, right.id)" />
       <div class="pk-info">
         <span class="pk-score">评分: {{ left.score }}</span>
         <button class="pk-btn left" @click="$emit('choose', 'left')">← 选这个</button>
       </div>
     </div>
 
-    <div class="pk-vs">VS</div>
+    <div class="pk-vs">对比</div>
 
     <div class="pk-side" :class="{ winner: selectedSide === 'right' }">
-      <img :src="'/api/thumbnail/' + right.id" @click="$emit('zoom', left.id, right.id)" />
+      <img :src="'/api/preview/' + right.id" @click="$emit('zoom', left.id, right.id)" />
       <div class="pk-info">
         <span class="pk-score">评分: {{ right.score }}</span>
         <button class="pk-btn right" @click="$emit('choose', 'right')">选这个 →</button>

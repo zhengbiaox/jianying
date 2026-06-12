@@ -5,7 +5,7 @@
 
     <div class="confirm-stats">
       <span>胜出: <strong>{{ winners.length }}</strong> 张</span>
-      <span>淘汰: <strong>{{ losersCount }}</strong> 张</span>
+      <span>未入选: <strong>{{ losersCount }}</strong> 张</span>
     </div>
 
     <div class="confirm-grid">
@@ -29,7 +29,7 @@
     <div v-if="exportResult" class="export-result">
       <p>✅ 导出完成！</p>
       <p>胜出: {{ exportResult.winners }} 张 → winners/</p>
-      <p>淘汰: {{ exportResult.losers }} 张 → losers/</p>
+      <p>未入选: {{ exportResult.losers }} 张 → losers/</p>
     </div>
   </div>
 </template>

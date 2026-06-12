@@ -1,10 +1,10 @@
 <template>
   <div class="prescreen-view">
-    <h2>废片审核</h2>
-    <p class="summary">以下照片被检测为废片，你可以捞回或确认淘汰</p>
+    <h2>照片筛选</h2>
+    <p class="summary">以下照片建议优化，你可以捞回或确认筛选</p>
 
     <div class="prescreen-stats">
-      <span>废片: {{ rejectedPhotos.length }} 张</span>
+      <span>待优化: {{ rejectedPhotos.length }} 张</span>
       <span>已捞回: {{ rescuedCount }} 张</span>
     </div>
 
@@ -30,7 +30,7 @@
 
     <div class="prescreen-actions">
       <button class="confirm-btn" @click="confirm">
-        确认淘汰，进入选片 →
+        确认筛选，进入选片 →
       </button>
     </div>
   </div>

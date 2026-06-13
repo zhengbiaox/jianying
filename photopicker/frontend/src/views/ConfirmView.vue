@@ -1,55 +1,59 @@
 <template>
   <div class="confirm-view">
-    <a-typography-title :heading="4">确认 · 导出</a-typography-title>
-    
-    <a-result v-if="!pkComplete" status="warning" title="尚有未完成的甄选">
-      <template #subtitle>
-        <p>已完成 {{ pkStatus.finished_groups }} / {{ pkStatus.total_groups }} 个场景</p>
-        <p>已保留 {{ pkStatus.selected_count }} 张</p>
-      </template>
-      <template #extra>
-        <a-button type="primary" @click="$router.push('/pick')">继续甄选 →</a-button>
-      </template>
-    </a-result>
-    
+    <h2>确认 · 导出</h2>
+
+    <!-- PK not complete -->
+    <div v-if="!pkComplete" class="not-ready">
+      <p class="not-ready-msg">尚有未完成的甄选</p>
+      <p class="not-ready-info">
+        已完成 {{ pkStatus.finished_groups }} / {{ pkStatus.total_groups }} 个场景
+      </p>
+      <p class="not-ready-info">
+        已保留 {{ pkStatus.selected_count }} 张
+      </p>
+      <button class="go-pick-btn" @click="$router.push('/pick')">继续甄选 →</button>
+    </div>
+
+    <!-- PK complete -->
     <div v-else>
-      <a-space style="margin-bottom: 1rem;">
-        <a-tag color="green">入选 {{ selectedPhotos.length }} 张</a-tag>
-        <a-tag color="red">淘汰 {{ rejectedCount }} 张</a-tag>
-      </a-space>
-      
-      <a-grid :cols="5" :col-gap="8" :row-gap="8" style="max-height: 40vh; overflow-y: auto; margin-bottom: 1.5rem;">
-        <a-grid-item v-for="photo in selectedPhotos" :key="photo.id">
-          <a-card :bordered="true" hoverable>
-            <template #cover>
-              <img :src="'/api/thumbnail/' + photo.id" style="width: 100%; height: 80px; object-fit: cover;" />
-            </template>
-            <a-tag color="green" size="small">{{ photo.score }} 分</a-tag>
-          </a-card>
-        </a-grid-item>
-      </a-grid>
-      
-      <a-space direction="vertical" style="width: 100%;">
-        <a-radio-group v-model="mode" type="button">
-          <a-radio value="copy">复制 · 保留原件</a-radio>
-          <a-radio value="move">移动 · 节省空间</a-radio>
-        </a-radio-group>
-        <a-button type="primary" size="large" long :loading="exporting" @click="doExport">导出并归档</a-button>
-      </a-space>
-      
-      <a-result v-if="exportResult" status="success" title="归档完成" style="margin-top: 1rem;">
-        <template #subtitle>
-          <p>入选 {{ exportResult['入选'] }} 张 · 淘汰 {{ exportResult['未入选'] }} 张</p>
-        </template>
-      </a-result>
+      <div class="confirm-stats">
+        <span>入选 <strong>{{ selectedPhotos.length }}</strong> 张</span>
+        <span>淘汰 <strong>{{ rejectedCount }}</strong> 张</span>
+      </div>
+
+      <div class="confirm-grid">
+        <div v-for="photo in selectedPhotos" :key="photo.id" class="confirm-card">
+          <img :src="'/api/thumbnail/' + photo.id" loading="lazy" />
+          <span class="card-score">{{ photo.score }}</span>
+        </div>
+      </div>
+
+      <div class="confirm-actions">
+        <div class="mode-select">
+          <label>导出模式:</label>
+          <label><input type="radio" v-model="mode" value="copy" /> 复制 · 保留原件</label>
+          <label><input type="radio" v-model="mode" value="move" /> 移动 · 节省空间</label>
+        </div>
+        <button class="export-btn" @click="doExport" :disabled="exporting">
+          {{ exporting ? '导出中...' : '导出并归档' }}
+        </button>
+      </div>
+
+      <div v-if="exportResult" class="export-result">
+        <p>✅ 归档完成！</p>
+        <p>入选 {{ exportResult['入选'] }} 张</p>
+        <p>淘汰 {{ exportResult['未入选'] }} 张</p>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import axios from 'axios'
 
+const router = useRouter()
 const allPhotos = ref([])
 const pkStatus = ref({ complete: false, total_groups: 0, finished_groups: 0, selected_count: 0 })
 const mode = ref('copy')
@@ -60,20 +64,55 @@ const pkComplete = computed(() => pkStatus.value.complete)
 const selectedPhotos = computed(() => allPhotos.value.filter(p => p.is_selected))
 const rejectedCount = computed(() => allPhotos.value.filter(p => p.is_rejected).length)
 
-async function loadStatus() { try { pkStatus.value = (await axios.get('/api/pk/status')).data } catch {} }
-async function loadPhotos() { allPhotos.value = (await axios.get('/api/photos')).data }
+async function loadStatus() {
+  try {
+    const res = await axios.get('/api/pk/status')
+    pkStatus.value = res.data
+  } catch {}
+}
+
+async function loadPhotos() {
+  const res = await axios.get('/api/photos')
+  allPhotos.value = res.data
+}
 
 async function doExport() {
   exporting.value = true
   try {
-    exportResult.value = (await axios.post('/api/export/final', null, { params: { mode: mode.value } })).data
-  } catch (e) { console.error(e) }
-  finally { exporting.value = false }
+    const res = await axios.post('/api/export/final', null, {
+      params: { mode: mode.value }
+    })
+    exportResult.value = res.data
+  } catch (e) {
+    alert('导出失败: ' + e.message)
+  } finally {
+    exporting.value = false
+  }
 }
 
-onMounted(() => { loadStatus(); loadPhotos() })
+onMounted(() => {
+  loadStatus()
+  loadPhotos()
+})
 </script>
 
 <style scoped>
 .confirm-view { padding: 1.5rem 2rem; }
+.confirm-view h2 { margin-bottom: 0.5rem; text-align: center; }
+.not-ready { text-align: center; padding: 4rem 0; }
+.not-ready-msg { font-size: 1.3rem; color: #ff9800; margin-bottom: 1rem; }
+.not-ready-info { color: #888; margin-bottom: 0.5rem; }
+.go-pick-btn { margin-top: 1.5rem; padding: 0.8rem 2rem; background: #0f3460; color: #fff; border: none; border-radius: 8px; font-size: 1.1rem; cursor: pointer; }
+.confirm-stats { display: flex; gap: 2rem; justify-content: center; margin-bottom: 1rem; }
+.confirm-stats strong { color: #4caf50; }
+.confirm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.8rem; max-height: 50vh; overflow-y: auto; margin-bottom: 1.5rem; }
+.confirm-card { position: relative; border-radius: 8px; overflow: hidden; border: 2px solid #4caf50; }
+.confirm-card img { width: 100%; height: 100px; object-fit: cover; }
+.card-score { position: absolute; top: 4px; right: 4px; background: rgba(0,0,0,0.7); color: #4caf50; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; }
+.confirm-actions { text-align: center; }
+.mode-select { display: flex; gap: 1rem; align-items: center; justify-content: center; margin-bottom: 1rem; }
+.mode-select label { color: #aaa; cursor: pointer; }
+.export-btn { padding: 0.8rem 2rem; background: #0f3460; color: #fff; border: none; border-radius: 8px; font-size: 1.1rem; cursor: pointer; }
+.export-btn:disabled { opacity: 0.5; }
+.export-result { text-align: center; margin-top: 1.5rem; background: #16213e; padding: 1.5rem; border-radius: 12px; }
 </style>

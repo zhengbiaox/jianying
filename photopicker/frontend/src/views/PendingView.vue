@@ -1,39 +1,41 @@
 <template>
   <div class="pending-view">
-    <h2>权衡 · 待定审阅</h2>
-    <p class="summary">以下照片暂缓决定，请逐张审阅</p>
-
-    <div class="pending-stats">
-      <span>待审: {{ pendingPhotos.length }} 张</span>
-      <span>已保留: {{ selectedCount }} 张</span>
-      <span>已放弃: {{ rejectedCount }} 张</span>
-    </div>
-
-    <div v-if="pendingPhotos.length > 0" class="pending-area">
-      <div class="pending-card">
-        <img :src="'/api/preview/' + currentPhoto.id" class="pending-img" />
-        <div class="pending-info">
-          <span class="pending-score">评分: {{ currentPhoto.score }}</span>
-          <span class="pending-name">{{ currentPhoto.path?.split('/').pop() }}</span>
-        </div>
-        <div class="pending-actions">
-          <button class="select-btn" @click="decide(currentPhoto.id, 'select')">保留</button>
-          <button class="reject-btn" @click="decide(currentPhoto.id, 'reject')">放弃</button>
-        </div>
-        <div class="pending-nav">
-          <span>{{ currentIndex + 1 }} / {{ pendingPhotos.length }}</span>
-        </div>
+    <a-typography-title :heading="4">权衡 · 待定审阅</a-typography-title>
+    <a-typography-text type="secondary">以下照片暂缓决定，请逐张审阅</a-typography-text>
+    
+    <a-space style="margin: 1rem 0;">
+      <a-tag color="orange">待审 {{ pendingPhotos.length }} 张</a-tag>
+      <a-tag color="green">已保留 {{ selectedCount }} 张</a-tag>
+      <a-tag color="red">已放弃 {{ rejectedCount }} 张</a-tag>
+    </a-space>
+    
+    <a-card v-if="pendingPhotos.length > 0" style="background: #16213e;">
+      <img :src="'/api/preview/' + currentPhoto.id" style="width: 100%; max-height: 55vh; object-fit: contain; border-radius: 8px; cursor: pointer;" />
+      <div style="margin-top: 1rem; text-align: center;">
+        <a-space>
+          <a-tag color="blue">{{ currentPhoto.score }} 分</a-tag>
+          <a-tag>{{ currentPhoto.path?.split('/').pop() }}</a-tag>
+        </a-space>
       </div>
-    </div>
-
-    <div v-else class="pending-done">
-      <p>所有待定照片已审阅完毕</p>
-    </div>
-
-    <div class="pending-actions-bottom">
-      <button class="confirm-btn" @click="confirmAll">
+      <a-space style="margin-top: 1rem; display: flex; justify-content: center;">
+        <a-button type="primary" status="success" size="large" @click="decide(currentPhoto.id, 'select')">保留</a-button>
+        <a-button type="primary" status="danger" size="large" @click="decide(currentPhoto.id, 'reject')">放弃</a-button>
+      </a-space>
+      <div style="text-align: center; margin-top: 0.5rem;">
+        <a-tag>{{ currentIndex + 1 }} / {{ pendingPhotos.length }}</a-tag>
+      </div>
+    </a-card>
+    
+    <a-result v-else status="success" title="所有待定照片已审阅完毕">
+      <template #extra>
+        <a-button type="primary" @click="confirmAll">确认并导出 →</a-button>
+      </template>
+    </a-result>
+    
+    <div style="text-align: center; margin-top: 1.5rem;">
+      <a-button type="primary" @click="confirmAll">
         {{ pendingPhotos.length > 0 ? '放弃剩余全部' : '确认并导出' }} →
-      </button>
+      </a-button>
     </div>
   </div>
 </template>
@@ -54,18 +56,11 @@ const rejectedCount = computed(() => allPhotos.value.filter(p => p.is_rejected).
 
 async function decide(id, action) {
   try {
-    if (action === 'select') {
-      await axios.post(`/api/pending/${id}/select`)
-    } else {
-      await axios.post(`/api/pending/${id}/reject`)
-    }
+    if (action === 'select') await axios.post(`/api/pending/${id}/select`)
+    else await axios.post(`/api/pending/${id}/reject`)
     await loadPhotos()
-    if (currentIndex.value >= pendingPhotos.value.length && currentIndex.value > 0) {
-      currentIndex.value = pendingPhotos.value.length - 1
-    }
-  } catch (e) {
-    alert('操作失败: ' + e.message)
-  }
+    if (currentIndex.value >= pendingPhotos.value.length && currentIndex.value > 0) currentIndex.value--
+  } catch {}
 }
 
 async function confirmAll() {
@@ -73,34 +68,13 @@ async function confirmAll() {
     await axios.post('/api/pending/confirm')
     await loadPhotos()
     router.push('/confirm')
-  } catch (e) {
-    alert('确认失败: ' + e.message)
-  }
+  } catch {}
 }
 
-async function loadPhotos() {
-  const res = await axios.get('/api/photos')
-  allPhotos.value = res.data
-}
-
+async function loadPhotos() { allPhotos.value = (await axios.get('/api/photos')).data }
 onMounted(loadPhotos)
 </script>
 
 <style scoped>
 .pending-view { padding: 1.5rem 2rem; max-width: 600px; margin: 0 auto; }
-.pending-view h2 { margin-bottom: 0.5rem; text-align: center; }
-.summary { color: #aaa; margin-bottom: 1rem; text-align: center; }
-.pending-stats { display: flex; gap: 2rem; justify-content: center; margin-bottom: 1.5rem; color: #888; }
-.pending-area { text-align: center; }
-.pending-card { background: #16213e; border-radius: 12px; padding: 1.5rem; }
-.pending-img { max-width: 100%; max-height: 55vh; object-fit: contain; border-radius: 8px; cursor: pointer; }
-.pending-info { margin-top: 1rem; display: flex; gap: 1rem; justify-content: center; }
-.pending-score { color: #4caf50; }
-.pending-name { color: #888; }
-.pending-actions { display: flex; gap: 2rem; justify-content: center; margin-top: 1rem; }
-.select-btn { padding: 0.6rem 2rem; background: #4caf50; color: #fff; border: none; border-radius: 8px; font-size: 1.1rem; cursor: pointer; }
-.reject-btn { padding: 0.6rem 2rem; background: #c0392b; color: #fff; border: none; border-radius: 8px; font-size: 1.1rem; cursor: pointer; }
-.pending-nav { margin-top: 1rem; color: #666; }
-.pending-actions-bottom { text-align: center; margin-top: 1.5rem; }
-.confirm-btn { padding: 0.8rem 2rem; background: #0f3460; color: #fff; border: none; border-radius: 8px; font-size: 1.1rem; cursor: pointer; }
 </style>

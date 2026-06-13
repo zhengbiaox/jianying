@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -21,7 +22,7 @@ from photopicker.backend.models import (
     PhotoInfo, PhotoGrade, SceneGroup, FilterLevel, PKResult, ExportRequest, SessionState, GroupState
 )
 from photopicker.backend.scanner import scan_folder, pair_jpg_raw
-from photopicker.backend.grouper import group_by_similarity, extract_phash_features
+from photopicker.backend.grouper import group_photos
 from photopicker.backend.detector import detect_blur, detect_exposure, detect_shake, calculate_score, score_to_grade, detect_quality_with_reasons, detect_quality_with_face
 from photopicker.backend.exporter import export_photos, export_winners_losers
 from photopicker.backend.state import save_session, load_session
@@ -106,6 +107,7 @@ def _load_clip():
         return False
 
 
+
 @app.post("/api/import")
 def import_folder(folder_path: str):
     global current_folder, clip_model, session_state, cache_dir, pref_tracker
@@ -129,6 +131,27 @@ def import_folder(folder_path: str):
     session_state = SessionState(folder=folder_path)
     save_session(session_state, folder_path)
     return {"count": len(photos_db), "message": "Import complete"}
+
+
+@app.post("/api/reset")
+def reset_all():
+    global session_state, current_folder, cache_dir, photos_db, groups_db
+
+    if cache_dir and os.path.exists(cache_dir):
+        shutil.rmtree(cache_dir, ignore_errors=True)
+
+    if current_folder:
+        state_file = os.path.join(current_folder, ".photopicker_state.json")
+        if os.path.exists(state_file):
+            os.remove(state_file)
+
+    photos_db.clear()
+    groups_db.clear()
+    session_state = None
+    current_folder = ""
+    cache_dir = ""
+
+    return {"ok": True, "message": "已重置"}
 
 
 @app.get("/api/photos")
@@ -168,7 +191,11 @@ def get_preview(photo_id: str):
         raise HTTPException(status_code=404, detail="Photo not found")
     photo = photos_db[photo_id]
     try:
-        return FileResponse(photo.path, media_type="image/jpeg")
+        return FileResponse(
+            photo.path,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
     except Exception:
         return Response(content=BROKEN_SVG, media_type="image/svg+xml")
 
@@ -211,10 +238,9 @@ def run_aesthetic():
 
 
 @app.post("/api/group")
-def run_grouping(threshold: float = 0.75):
+def run_grouping(threshold: float = 0.38):
     global session_state
     groups_db.clear()
-    features = {}
 
     progress_state["status"] = "grouping"
     progress_state["done"] = 0
@@ -222,32 +248,12 @@ def run_grouping(threshold: float = 0.75):
     progress_state["label"] = "分组中"
     get_logger().info(f"Starting grouping with threshold {threshold}")
 
-    use_clip = _load_clip()
+    # Always use multi-signal grouping (time + hash + color + filename)
+    photo_paths = {pid: p.path for pid, p in photos_db.items()}
+    grouped = group_photos(photo_paths, threshold=threshold)
+    progress_state["done"] = len(photos_db)
+    print(f"Multi-signal grouping completed for {len(photos_db)} photos")
 
-    if use_clip:
-        import torch
-        from PIL import Image
-        device = get_device(runtime_preference)
-        clip_model.to(device)
-        for photo_id, photo in photos_db.items():
-            try:
-                img = Image.open(photo.path).convert("RGB")
-                image = clip_preprocess(img).unsqueeze(0).to(device)
-                with torch.no_grad():
-                    feat = clip_model.encode_image(image)
-                    feat = feat / feat.norm(dim=-1, keepdim=True)
-                features[photo_id] = feat.squeeze().cpu().numpy()
-            except Exception:
-                pass
-            progress_state["done"] += 1
-        print(f"CLIP: extracted features for {len(features)} photos")
-    else:
-        photo_paths = {pid: p.path for pid, p in photos_db.items()}
-        features = extract_phash_features(photo_paths)
-        progress_state["done"] = len(photos_db)
-        print(f"pHash: extracted features for {len(features)} photos")
-
-    grouped = group_by_similarity(features, threshold)
     for group_id, photo_ids in grouped.items():
         cover_id = photo_ids[0]
         groups_db[group_id] = SceneGroup(
@@ -259,28 +265,300 @@ def run_grouping(threshold: float = 0.75):
             if pid in photos_db:
                 photos_db[pid].scene_group = group_id
 
-    for gid, group in groups_db.items():
-        if len(group.photos) == 1:
-            pid = group.photos[0]
-            if pid in photos_db:
-                photos_db[pid].is_selected = True
+    # NO auto-select for single-photo groups — user decides in PK view
 
     if session_state:
         from photopicker.backend.models import GroupState
-        session_state.groups = [
-            GroupState(id=gid, images=list(g.photos))
-            for gid, g in groups_db.items()
-        ]
+        session_state.groups = []
+        for gid, g in groups_db.items():
+            gs = GroupState(id=gid, images=list(g.photos))
+            if len(g.photos) == 1:
+                gs.left = g.photos[0]
+                gs.right = None
+                gs.pending = []
+            else:
+                gs.left = g.photos[0]
+                gs.right = g.photos[1]
+                gs.pending = g.photos[2:]
+            session_state.groups.append(gs)
         session_state.threshold = threshold
         save_session(session_state, current_folder)
 
     progress_state["status"] = "done"
-    return {"groups": len(groups_db), "method": "clip" if use_clip else "phash"}
+    return {"groups": len(groups_db)}
 
 
 @app.get("/api/groups")
 def get_groups():
     return list(groups_db.values())
+
+
+def advance_group(group: GroupState, action: str) -> dict:
+    """Advance the PK state machine (elimination pairing mode).
+
+    Elimination logic — each photo only appears ONCE:
+    - 'left': left is selected, right is eliminated. Both slots refilled from pending.
+    - 'right': right is selected, left is eliminated. Both slots refilled from pending.
+    - 'both': both are selected. Both slots refilled from pending.
+    - 'none': both are eliminated. Both slots refilled from pending.
+    - 'keep': (single mode) keep the photo as winner.
+    - 'reject': (single mode) reject the photo.
+    """
+    result = {'action': action, 'finished': False, 'winners': []}
+
+    # Single-mode specific actions
+    if action == 'keep':
+        winner = group.left or group.right
+        if winner:
+            group.extra_winners.append(winner)
+        group.left = None
+        group.right = None
+        group.finished = True
+        result['finished'] = True
+        result['winners'] = [winner] if winner else []
+        return result
+
+    if action == 'reject':
+        victim = group.left or group.right
+        if victim:
+            group.losers.append(victim)
+        group.left = None
+        group.right = None
+        group.finished = True
+        result['finished'] = True
+        return result
+
+    # Multi-photo elimination pairing
+    if action == 'left':
+        # Left selected, right eliminated
+        if group.left:
+            group.extra_winners.append(group.left)
+            result['winners'].append(group.left)
+        if group.right:
+            group.losers.append(group.right)
+        group.left = None
+        group.right = None
+    elif action == 'right':
+        # Right selected, left eliminated
+        if group.right:
+            group.extra_winners.append(group.right)
+            result['winners'].append(group.right)
+        if group.left:
+            group.losers.append(group.left)
+        group.left = None
+        group.right = None
+    elif action == 'both':
+        # Both selected
+        if group.left:
+            group.extra_winners.append(group.left)
+            result['winners'].append(group.left)
+        if group.right:
+            group.extra_winners.append(group.right)
+            result['winners'].append(group.right)
+        group.left = None
+        group.right = None
+    elif action == 'none':
+        # Both eliminated
+        if group.left:
+            group.losers.append(group.left)
+        if group.right:
+            group.losers.append(group.right)
+        group.left = None
+        group.right = None
+
+    # Refill BOTH slots from pending
+    if group.pending:
+        group.left = group.pending.pop(0)
+    if group.pending:
+        group.right = group.pending.pop(0)
+
+    # Check finished condition: no more photos to show
+    if not group.left and not group.right:
+        group.finished = True
+    elif group.left and not group.right and not group.pending:
+        # Odd photo remaining — show as single mode next round
+        pass
+
+    result['finished'] = group.finished
+    return result
+
+
+@app.post("/api/pk/advance")
+def pk_advance(group_id: str, action: str):
+    """Arena PK advance.
+
+    Actions:
+    - 'left': champion (left) wins, challenger (right) eliminated
+    - 'right': challenger (right) wins, becomes new champion
+    - 'both': keep both photos
+    - 'none': reject both photos
+    - 'keep': (single mode) keep the photo
+    - 'reject': (single mode) reject the photo
+    """
+    if not session_state:
+        raise HTTPException(400, "No session")
+
+    if action not in ('left', 'right', 'both', 'none', 'keep', 'reject'):
+        raise HTTPException(400, f"Invalid action: {action}")
+
+    target_group = None
+    for gs in session_state.groups:
+        if gs.id == group_id:
+            target_group = gs
+            break
+
+    if not target_group:
+        raise HTTPException(404, "Group not found")
+    if target_group.finished:
+        raise HTTPException(400, "Group already finished")
+
+    # Save snapshot for undo
+    target_group.save_snapshot()
+
+    # Record which photos are being decided on (before advance changes state)
+    left_before = target_group.left
+    right_before = target_group.right
+
+    # Mark losers in photos_db
+    if action == 'left' and right_before and right_before in photos_db:
+        photos_db[right_before].is_rejected = True
+        photos_db[right_before].is_selected = False
+    elif action == 'right' and left_before and left_before in photos_db:
+        photos_db[left_before].is_rejected = True
+        photos_db[left_before].is_selected = False
+    elif action == 'both':
+        # Both kept — mark as selected
+        if left_before and left_before in photos_db:
+            photos_db[left_before].is_selected = True
+        if right_before and right_before in photos_db:
+            photos_db[right_before].is_selected = True
+    elif action == 'none':
+        # Both rejected
+        if left_before and left_before in photos_db:
+            photos_db[left_before].is_rejected = True
+            photos_db[left_before].is_selected = False
+        if right_before and right_before in photos_db:
+            photos_db[right_before].is_rejected = True
+            photos_db[right_before].is_selected = False
+    elif action == 'keep':
+        victim = left_before or right_before
+        if victim and victim in photos_db:
+            photos_db[victim].is_selected = True
+    elif action == 'reject':
+        victim = left_before or right_before
+        if victim and victim in photos_db:
+            photos_db[victim].is_rejected = True
+            photos_db[victim].is_selected = False
+
+    # Advance the state machine
+    result = advance_group(target_group, action)
+
+    # The pk_advance endpoint already marked photo states above (before advance),
+    # but advance_group also tracks extra_winners/losers.
+    # Ensure all extra_winners are marked as selected
+    for ew in target_group.extra_winners:
+        if ew in photos_db:
+            photos_db[ew].is_selected = True
+            photos_db[ew].is_rejected = False
+
+    save_session(session_state, current_folder)
+
+    # Return current group state for frontend
+    return {
+        'action': action,
+        'finished': target_group.finished,
+        'left': target_group.left,
+        'right': target_group.right,
+        'pending_count': len(target_group.pending),
+        'losers_count': len(target_group.losers),
+        'winners_count': len(target_group.extra_winners),
+    }
+
+
+@app.get("/api/pk/status")
+def pk_status():
+    if not session_state:
+        return {"complete": False, "total_groups": 0, "finished_groups": 0, "selected_count": 0}
+
+    total = len(session_state.groups)
+    finished = sum(1 for g in session_state.groups if g.finished)
+    selected = sum(1 for p in photos_db.values() if p.is_selected)
+
+    return {
+        "complete": finished >= total and total > 0,
+        "total_groups": total,
+        "finished_groups": finished,
+        "selected_count": selected,
+    }
+
+
+@app.get("/api/pk/current")
+def get_current_pk():
+    """Get the current group to process in the PK arena.
+
+    Returns the first unfinished group, or done=True if all finished.
+    Multi-photo groups are returned first, then single-photo groups.
+    """
+    if not session_state:
+        raise HTTPException(400, "No session")
+
+    # Sort: multi-photo groups first, single-photo groups after
+    multi_groups = [g for g in session_state.groups if len(g.images) > 1 and not g.finished]
+    single_groups = [g for g in session_state.groups if len(g.images) == 1 and not g.finished]
+    unfinished = multi_groups + single_groups
+
+    if not unfinished:
+        total = len(session_state.groups)
+        finished = sum(1 for g in session_state.groups if g.finished)
+        return {
+            'done': True,
+            'total_groups': total,
+            'finished_groups': finished,
+            'selected_count': sum(1 for p in photos_db.values() if p.is_selected),
+            'rejected_count': sum(1 for p in photos_db.values() if p.is_rejected),
+        }
+
+    g = unfinished[0]
+    total = len(session_state.groups)
+    finished = sum(1 for gs in session_state.groups if gs.finished)
+    # Single mode: originally 1 photo, OR odd remaining photo (left filled but right empty, no pending)
+    is_single = len(g.images) == 1 or (g.left and not g.right and not g.pending)
+
+    return {
+        'done': False,
+        'group_id': g.id,
+        'group_size': len(g.images),
+        'is_single': is_single,
+        'left': g.left,
+        'right': g.right,
+        'pending_count': len(g.pending),
+        'losers_count': len(g.losers),
+        'winners_count': len(g.extra_winners),
+        'decided_count': len(g.losers) + len(g.extra_winners),
+        'total_groups': total,
+        'finished_groups': finished,
+        'multi_remaining': len(multi_groups),
+        'single_remaining': len(single_groups),
+    }
+
+
+@app.get("/api/pk/group_state")
+def get_group_state(group_id: str):
+    if not session_state:
+        raise HTTPException(400, "No session")
+    for gs in session_state.groups:
+        if gs.id == group_id:
+            return {
+                'id': gs.id,
+                'left': gs.left,
+                'right': gs.right,
+                'pending': gs.pending,
+                'losers': gs.losers,
+                'winner': gs.winner,
+                'extra_winners': gs.extra_winners,
+                'finished': gs.finished,
+            }
+    raise HTTPException(404, "Group not found")
 
 
 @app.post("/api/pk/submit")
@@ -291,9 +569,15 @@ def submit_pk(result: PKResult):
                 gs.save_snapshot()
                 break
     if result.loser_id in photos_db:
-        photos_db[result.loser_id].is_rejected = True
+        p = photos_db[result.loser_id]
+        p.is_rejected = True
+        p.is_selected = False
+        p.is_pending = False
     if result.winner_id in photos_db:
-        photos_db[result.winner_id].is_selected = True
+        p = photos_db[result.winner_id]
+        p.is_selected = True
+        p.is_rejected = False
+        p.is_pending = False
     if pref_tracker and result.winner_id in photos_db and result.loser_id in photos_db:
         try:
             winner_stats = compute_aesthetic_score(photos_db[result.winner_id].path).get("breakdown", {})
@@ -311,26 +595,32 @@ def submit_pk(result: PKResult):
 def select_photo(photo_id: str):
     if photo_id not in photos_db:
         raise HTTPException(status_code=404, detail="Photo not found")
-    photos_db[photo_id].is_selected = True
-    photos_db[photo_id].is_rejected = False
-    return photos_db[photo_id]
+    p = photos_db[photo_id]
+    p.is_selected = True
+    p.is_rejected = False
+    p.is_pending = False
+    return p
 
 
 @app.post("/api/photos/{photo_id}/reject")
 def reject_photo(photo_id: str):
     if photo_id not in photos_db:
         raise HTTPException(status_code=404, detail="Photo not found")
-    photos_db[photo_id].is_rejected = True
-    photos_db[photo_id].is_selected = False
-    return photos_db[photo_id]
+    p = photos_db[photo_id]
+    p.is_rejected = True
+    p.is_selected = False
+    p.is_pending = False
+    return p
 
 
 @app.post("/api/photos/{photo_id}/rescue")
 def rescue_photo(photo_id: str):
     if photo_id not in photos_db:
         raise HTTPException(status_code=404, detail="Photo not found")
-    photos_db[photo_id].is_rejected = False
-    return photos_db[photo_id]
+    p = photos_db[photo_id]
+    p.is_rejected = False
+    p.is_pending = False
+    return p
 
 
 @app.post("/api/pk/skip_pair")
@@ -415,20 +705,65 @@ def export_selected(req: ExportRequest):
 
 
 @app.post("/api/pk/undo")
-def pk_undo():
+def pk_undo(group_id: str | None = None):
     if not session_state:
         raise HTTPException(400, "No session")
     if not session_state.groups:
         raise HTTPException(400, "No groups in session")
-    idx = session_state.current_group
-    if idx < 0 or idx >= len(session_state.groups):
-        raise HTTPException(400, f"Invalid group index: {idx}")
-    current = session_state.groups[idx]
-    if not current.undo_stack:
+
+    target = None
+    if group_id:
+        # Find specified group
+        for gs in session_state.groups:
+            if gs.id == group_id:
+                target = gs
+                break
+    else:
+        # Find the most recently modified group (last one with undo history)
+        # Try current unfinished group first, then any group with undo_stack
+        multi_groups = [g for g in session_state.groups if len(g.images) > 1 and not g.finished]
+        single_groups = [g for g in session_state.groups if len(g.images) == 1 and not g.finished]
+        unfinished = multi_groups + single_groups
+        if unfinished and unfinished[0].undo_stack:
+            target = unfinished[0]
+        else:
+            # Find any group with undo history (most recent action)
+            for gs in reversed(session_state.groups):
+                if gs.undo_stack:
+                    target = gs
+                    break
+
+    if not target:
         raise HTTPException(400, "Nothing to undo")
-    current.undo()
+    if not target.undo_stack:
+        raise HTTPException(400, "Nothing to undo for this group")
+
+    # Get info about what was undone for restoring photo states
+    old_losers = set(target.losers)
+    old_extra_winners = set(target.extra_winners)
+    old_winner = target.winner
+
+    target.undo()
+
+    # Restore photo states for undone photos
+    new_losers = set(target.losers)
+    new_extra_winners = set(target.extra_winners)
+
+    # Photos that were losers but no longer are
+    for pid in old_losers - new_losers:
+        if pid in photos_db:
+            photos_db[pid].is_rejected = False
+    # Photos that were extra_winners but no longer are
+    for pid in old_extra_winners - new_extra_winners:
+        if pid in photos_db:
+            photos_db[pid].is_selected = False
+    # If winner was set but undone
+    if old_winner and old_winner != target.winner:
+        if old_winner in photos_db:
+            photos_db[old_winner].is_selected = False
+
     save_session(session_state, current_folder)
-    return {"ok": True}
+    return {"ok": True, "group_id": target.id}
 
 
 @app.post("/api/pk/skip")
@@ -495,8 +830,14 @@ def export_winners(mode: str = "copy"):
             winners.append(photo.path)
         elif photo.is_rejected:
             losers.append(photo.path)
+    # Build raw_paths mapping for JPG->RAW pairing
+    raw_paths = {}
+    for p in photos_db.values():
+        if p.raw_path:
+            raw_paths[p.path] = p.raw_path
     result = export_winners_losers(
-        folder=current_folder, winners=winners, losers=losers, mode=mode
+        folder=current_folder, winners=winners, losers=losers, mode=mode,
+        raw_paths=raw_paths
     )
     return result
 
@@ -532,6 +873,44 @@ def set_runtime(preference: str = "auto"):
     runtime_preference = preference
     device = get_device(preference)
     return {"preference": preference, "device": device}
+
+
+@app.get("/api/exif/{photo_id}")
+def get_exif(photo_id: str):
+    if photo_id not in photos_db:
+        raise HTTPException(404)
+    photo = photos_db[photo_id]
+    try:
+        from PIL import Image
+        from PIL.ExifTags import TAGS
+        img = Image.open(photo.path)
+        exif_data = img._getexif()
+        if not exif_data:
+            return {}
+        result = {}
+        for tag_id, value in exif_data.items():
+            tag = TAGS.get(tag_id, tag_id)
+            if tag == 'Make':
+                result['make'] = str(value).strip()
+            elif tag == 'Model':
+                result['model'] = str(value).strip()
+            elif tag == 'FocalLength':
+                result['focal_length'] = str(value)
+            elif tag == 'FNumber':
+                result['aperture'] = f'f/{float(value)}'
+            elif tag == 'ExposureTime':
+                if isinstance(value, tuple):
+                    result['shutter'] = f'{value[0]}/{value[1]}s'
+                else:
+                    result['shutter'] = f'{value}s'
+            elif tag == 'ISOSpeedRatings':
+                result['iso'] = f'ISO{value}'
+            elif tag == 'LensModel':
+                result['lens'] = str(value).strip()
+        return result
+    except Exception:
+        return {}
+
 
 
 @app.get("/api/progress")
@@ -642,6 +1021,12 @@ def _run_auto_process(folder_path, filter_level, runtime):
         process_state["total"] = len(photo_list)
 
         from concurrent.futures import ThreadPoolExecutor, as_completed
+        import cv2
+
+        # --- Phase 1: Quality detection ---
+        # OpenCV/MediaPipe are C++ libs that release the GIL,
+        # so ThreadPoolExecutor gives real parallelism here (no need for ProcessPool).
+        workers = min(8, max(2, (os.cpu_count() or 4)))
 
         def detect_one(args):
             photo_id, path = args
@@ -654,8 +1039,6 @@ def _run_auto_process(folder_path, filter_level, runtime):
             except Exception:
                 return photo_id, None
 
-        import cv2
-        workers = min(8, max(2, (os.cpu_count() or 4)))
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {
                 executor.submit(detect_one, (pid, path)): pid
@@ -689,8 +1072,22 @@ def _run_auto_process(folder_path, filter_level, runtime):
 
         if not process_cancel.is_set():
             photo_paths = {pid: p.path for pid, p in photos_db.items()}
-            features = extract_phash_features(photo_paths)
-            grouped = group_by_similarity(features, 0.75)
+            # Extract timestamps for better grouping
+            timestamps = {}
+            from PIL import Image as PILImage
+            for pid, path in photo_paths.items():
+                try:
+                    img = PILImage.open(path)
+                    exif = img._getexif() or {}
+                    dt_str = exif.get(36867) or exif.get(306)  # DateTimeOriginal or DateTime
+                    if dt_str:
+                        from datetime import datetime
+                        dt = datetime.strptime(str(dt_str).strip(), "%Y:%m:%d %H:%M:%S")
+                        timestamps[pid] = dt.timestamp()
+                    img.close()
+                except Exception:
+                    pass
+            grouped = group_photos(photo_paths, timestamps=timestamps, threshold=0.50)
             groups_db.clear()
             for group_id, photo_ids in grouped.items():
                 groups_db[group_id] = SceneGroup(
@@ -701,11 +1098,12 @@ def _run_auto_process(folder_path, filter_level, runtime):
                         photos_db[pid].scene_group = group_id
             process_state["groups_count"] = len(groups_db)
 
-        for gid, group in groups_db.items():
-            if len(group.photos) == 1:
-                pid = group.photos[0]
-                if pid in photos_db:
-                    photos_db[pid].is_selected = True
+            # Sort photos within each group by quality score (highest first)
+            for gid, group in groups_db.items():
+                group.photos.sort(key=lambda pid: photos_db[pid].score if pid in photos_db else 0, reverse=True)
+
+        # Single-photo groups: do NOT auto-select, let user decide in PK
+        # They will be handled as "single mode" in the PK view
 
         # Sync groups to session_state for undo support
         group_states = []
@@ -715,8 +1113,11 @@ def _run_auto_process(folder_path, filter_level, runtime):
                 images=list(group.photos),
             )
             if len(group.photos) == 1:
-                gs.winner = group.photos[0]
-                gs.finished = True
+                # Single photo: put in left slot, right stays empty
+                # User decides in PK view (single mode)
+                gs.left = group.photos[0]
+                gs.right = None
+                gs.pending = []
             else:
                 gs.left = group.photos[0]
                 gs.right = group.photos[1]
@@ -769,17 +1170,66 @@ def get_process_status():
 def prescreen_rescue(photo_id: str):
     if photo_id not in photos_db:
         raise HTTPException(404, "Photo not found")
-    photos_db[photo_id].is_rejected = False
-    return photos_db[photo_id]
+    p = photos_db[photo_id]
+    p.is_rejected = False
+    p.is_pending = False
+    return p
 
 
 @app.post("/api/prescreen/confirm")
 def confirm_prescreen():
+    """Confirm prescreen results. Photos below threshold that weren't rescued get rejected.
+    Rescued photos (is_rejected=False despite low score) are kept for PK.
+    """
     threshold = session_state.filter_level if session_state else 60
+
+    # Photos below threshold with is_rejected still False = rescued by user (via /api/photos/{id}/rescue)
+    # Photos below threshold with is_rejected unset (neither True nor False initially) = should be rejected
+    # The auto_process doesn't pre-reject, so we mark all low-score photos as rejected
+    # EXCEPT those the user has explicitly rescued (is_rejected explicitly set to False by rescue endpoint)
+    rescued_ids = set()
     for p in photos_db.values():
         if p.score < threshold:
+            if not p.is_rejected:
+                # Check if user explicitly rescued (the rescue endpoint sets is_rejected=False)
+                # We track rescued in the frontend via rescuedIds, so all non-rejected low-score = rescued
+                rescued_ids.add(p.id)
+            # If already is_rejected=True, keep it rejected
+
+    # Mark remaining low-score photos as rejected
+    for p in photos_db.values():
+        if p.score < threshold and p.id not in rescued_ids:
             p.is_rejected = True
-    return {"confirmed": True}
+            p.is_selected = False
+            p.is_pending = False
+
+    # Remove rejected photos from PK groups so they don't appear in arena
+    if session_state:
+        rejected_set = {pid for pid, p in photos_db.items() if p.is_rejected}
+        for gs in session_state.groups:
+            if gs.finished:
+                continue
+            # Remove rejected photos from group state
+            if gs.left in rejected_set:
+                gs.left = None
+            if gs.right in rejected_set:
+                gs.right = None
+            gs.pending = [pid for pid in gs.pending if pid not in rejected_set]
+            gs.images = [pid for pid in gs.images if pid not in rejected_set]
+
+            # Refill slots
+            if gs.left is None and gs.pending:
+                gs.left = gs.pending.pop(0)
+            if gs.right is None and gs.pending:
+                gs.right = gs.pending.pop(0)
+
+            # Mark group finished if empty
+            if not gs.left and not gs.right and not gs.pending:
+                gs.finished = True
+
+        save_session(session_state, current_folder)
+
+    return {"confirmed": True, "rescued": len(rescued_ids)}
 
 
 @app.get("/api/final_confirm")
@@ -797,8 +1247,14 @@ def final_confirm():
 def export_final(mode: str = "copy"):
     selected = [p.path for p in photos_db.values() if p.is_selected]
     rejected = [p.path for p in photos_db.values() if p.is_rejected]
+    # Build raw_paths mapping for JPG->RAW pairing
+    raw_paths = {}
+    for p in photos_db.values():
+        if p.raw_path:
+            raw_paths[p.path] = p.raw_path
     result = export_winners_losers(
-        folder=current_folder, winners=selected, losers=rejected, mode=mode
+        folder=current_folder, winners=selected, losers=rejected, mode=mode,
+        raw_paths=raw_paths
     )
     return result
 

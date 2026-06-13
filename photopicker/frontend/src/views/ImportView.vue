@@ -2,13 +2,13 @@
   <div class="import-view">
     <!-- Phase 1: Directory selection -->
     <div v-if="phase === 'select'">
-      <h2>PhotoPicker 选片工具</h2>
+      <h2>PhotoPicker</h2>
       <div class="browser">
         <div class="browser-path">
           <span class="path-label">当前路径:</span>
           <span class="path-text">{{ currentPath }}</span>
           <button class="up-btn" @click="goUp" :disabled="!parentPath">↑ 上级</button>
-          <button class="native-btn" @click="nativePick">系统选择</button>
+          <button class="native-btn" @click="nativePick">浏览</button>
         </div>
         <div class="dir-list">
           <div v-for="dir in dirs" :key="dir.path" class="dir-item" @click="navigate(dir.path)">
@@ -17,36 +17,40 @@
           <div v-if="dirs.length === 0" class="empty">此目录下没有子文件夹</div>
         </div>
         <div class="folder-preview" v-if="preview">
-          <p>发现 <strong>{{ preview.count }}</strong> 张照片，共 <strong>{{ preview.size_mb }} MB</strong></p>
+          <p>        已识别 <strong>{{ preview.count }}</strong> 张照片，共 <strong>{{ preview.size_mb }} MB</strong></p>
         </div>
       </div>
       <div class="options">
         <div class="option-group">
-          <label>加速方式:</label>
+          <label>处理引擎:</label>
           <div class="radio-group">
-            <label><input type="radio" v-model="runtime" value="auto" /> 自动</label>
+            <label><input type="radio" v-model="runtime" value="auto" /> 自动检测</label>
             <label><input type="radio" v-model="runtime" value="cpu" /> CPU</label>
             <label><input type="radio" v-model="runtime" value="gpu" /> GPU</label>
           </div>
         </div>
         <div class="option-group">
-          <label>筛选模式:</label>
+          <label>甄选策略:</label>
           <div class="radio-group">
-            <label><input type="radio" v-model="filterLevel" value="80" /> 🟢 严格</label>
-            <label><input type="radio" v-model="filterLevel" value="60" /> 🟡 适中</label>
-            <label><input type="radio" v-model="filterLevel" value="40" /> 🔴 宽松</label>
+            <label><input type="radio" v-model="filterLevel" value="80" /> 🟢 精选 · 严格</label>
+            <label><input type="radio" v-model="filterLevel" value="60" /> 🟡 均衡 · 推荐</label>
+            <label><input type="radio" v-model="filterLevel" value="40" /> 🔴 宽泛 · 保守</label>
           </div>
         </div>
       </div>
       <button class="start-btn" @click="startProcess" :disabled="!currentPath">
-        开始整理
+        开始分析
       </button>
+      <div class="reset-section">
+        <button class="reset-btn" @click="doReset">重新开始</button>
+        <p class="reset-hint">清除所有缓存与进度</p>
+      </div>
     </div>
 
     <!-- Phase 2: Processing with photo wall -->
     <div v-if="phase === 'processing'" class="processing">
       <div class="progress-header">
-        <h3>正在分析照片...</h3>
+        <h3>正在逐帧分析...</h3>
         <button class="stop-btn" @click="stopProcess">停止</button>
       </div>
       <div class="progress-bar">
@@ -54,7 +58,7 @@
       </div>
       <div class="progress-info">
         <span>{{ processStatus.done }} / {{ processStatus.total }}</span>
-        <span>待优化: {{ processStatus.rejected_count }} 张</span>
+        <span>建议淘汰: {{ processStatus.rejected_count }} 张</span>
         <span v-if="eta">预计剩余: {{ eta }}</span>
       </div>
       <div class="photo-wall">
@@ -63,7 +67,7 @@
           <img :src="'/api/thumbnail/' + ev.id" loading="lazy" />
           <div class="wall-overlay">
             <span class="wall-score">{{ ev.score }}</span>
-            <span v-if="ev.rejected" class="wall-reason">{{ ev.reasons[0] || '待优化' }}</span>
+            <span v-if="ev.rejected" class="wall-reason">{{ ev.reasons[0] || '建议淘汰' }}</span>
           </div>
         </div>
       </div>
@@ -74,17 +78,17 @@
       <h3>✅ 分析完成</h3>
       <div class="done-stats">
         <p>共 <strong>{{ processStatus.total }}</strong> 张照片</p>
-        <p>待优化: <strong>{{ processStatus.rejected_count }}</strong> 张</p>
-        <p>分组: <strong>{{ processStatus.groups_count }}</strong> 组</p>
+        <p>建议淘汰: <strong>{{ processStatus.rejected_count }}</strong> 张</p>
+        <p>识别 <strong>{{ processStatus.groups_count }}</strong> 个场景</p>
       </div>
-      <button class="next-btn" @click="$router.push('/prescreen')">进入照片筛选 →</button>
+      <button class="next-btn" @click="$router.push('/prescreen')">开始筛选 →</button>
     </div>
 
     <!-- Phase 4: Stopped -->
     <div v-if="phase === 'stopped'" class="done">
       <h3>⏹ 已停止</h3>
-      <p>已处理 {{ processStatus.done }} 张，待优化 {{ processStatus.rejected_count }} 张</p>
-      <button class="next-btn" @click="$router.push('/prescreen')">进入照片筛选 →</button>
+      <p>已处理 {{ processStatus.done }} 张，建议淘汰 {{ processStatus.rejected_count }} 张</p>
+      <button class="next-btn" @click="$router.push('/prescreen')">开始筛选 →</button>
       <button class="restart-btn" @click="phase = 'select'">重新开始</button>
     </div>
   </div>
@@ -194,6 +198,16 @@ async function stopProcess() {
 
 onUnmounted(() => { if (pollHandle) clearInterval(pollHandle) })
 onMounted(() => browse())
+
+async function doReset() {
+  if (!confirm('确定要重置吗？会清除所有缓存和进度数据。')) return
+  try {
+    await axios.post('/api/reset')
+    location.reload(true)
+  } catch (e) {
+    alert('重置失败: ' + e.message)
+  }
+}
 </script>
 
 <style scoped>
@@ -239,4 +253,8 @@ onMounted(() => browse())
 .done-stats strong { color: #4caf50; }
 .next-btn { padding: 0.8rem 2rem; background: #0f3460; color: #fff; border: none; border-radius: 8px; font-size: 1.1rem; cursor: pointer; margin: 0.5rem; }
 .restart-btn { padding: 0.8rem 2rem; background: #333; color: #aaa; border: none; border-radius: 8px; font-size: 1rem; cursor: pointer; margin: 0.5rem; }
+.reset-section { margin-top: 2rem; text-align: center; padding: 1rem; border-top: 1px solid #333; }
+.reset-btn { padding: 0.5rem 1.5rem; background: #c0392b; color: #fff; border: none; border-radius: 8px; cursor: pointer; }
+.reset-btn:hover { background: #e74c3c; }
+.reset-hint { color: #666; font-size: 0.8rem; margin-top: 0.5rem; }
 </style>

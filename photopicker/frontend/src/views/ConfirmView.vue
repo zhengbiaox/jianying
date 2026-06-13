@@ -1,24 +1,24 @@
 <template>
   <div class="confirm-view">
-    <h2>最终确认</h2>
+    <h2>确认 · 导出</h2>
 
     <!-- PK not complete -->
     <div v-if="!pkComplete" class="not-ready">
-      <p class="not-ready-msg">请先完成所有选片</p>
+      <p class="not-ready-msg">尚有未完成的甄选</p>
       <p class="not-ready-info">
-        已完成 {{ pkStatus.finished_groups }} / {{ pkStatus.total_groups }} 组
+        已完成 {{ pkStatus.finished_groups }} / {{ pkStatus.total_groups }} 个场景
       </p>
       <p class="not-ready-info">
-        已选中 {{ pkStatus.selected_count }} 张照片
+        已保留 {{ pkStatus.selected_count }} 张
       </p>
-      <button class="go-pick-btn" @click="$router.push('/pick')">去选片 →</button>
+      <button class="go-pick-btn" @click="$router.push('/pick')">继续甄选 →</button>
     </div>
 
     <!-- PK complete -->
     <div v-else>
       <div class="confirm-stats">
-        <span>入选: <strong>{{ selectedPhotos.length }}</strong> 张</span>
-        <span>未入选: <strong>{{ rejectedCount }}</strong> 张</span>
+        <span>入选 <strong>{{ selectedPhotos.length }}</strong> 张</span>
+        <span>淘汰 <strong>{{ rejectedCount }}</strong> 张</span>
       </div>
 
       <div class="confirm-grid">
@@ -31,18 +31,18 @@
       <div class="confirm-actions">
         <div class="mode-select">
           <label>导出模式:</label>
-          <label><input type="radio" v-model="mode" value="copy" /> 复制</label>
-          <label><input type="radio" v-model="mode" value="move" /> 移动</label>
+          <label><input type="radio" v-model="mode" value="copy" /> 复制 · 保留原件</label>
+          <label><input type="radio" v-model="mode" value="move" /> 移动 · 节省空间</label>
         </div>
         <button class="export-btn" @click="doExport" :disabled="exporting">
-          {{ exporting ? '导出中...' : '确认导出' }}
+          {{ exporting ? '导出中...' : '导出并归档' }}
         </button>
       </div>
 
       <div v-if="exportResult" class="export-result">
-        <p>✅ 导出完成！</p>
-        <p>入选: {{ exportResult['入选'] }} 张</p>
-        <p>未入选: {{ exportResult['未入选'] }} 张</p>
+        <p>✅ 归档完成！</p>
+        <p>入选 {{ exportResult['入选'] }} 张</p>
+        <p>淘汰 {{ exportResult['未入选'] }} 张</p>
       </div>
     </div>
   </div>

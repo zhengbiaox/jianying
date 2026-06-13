@@ -1,10 +1,11 @@
 <template>
   <div id="app">
     <nav class="top-nav">
-      <router-link to="/import">首页</router-link>
-      <router-link to="/prescreen">照片筛选</router-link>
-      <router-link to="/pick">PK选片</router-link>
-      <router-link to="/confirm">最终确认</router-link>
+      <router-link to="/import">开始</router-link>
+      <router-link to="/prescreen">筛选</router-link>
+      <router-link to="/pick">甄选</router-link>
+      <router-link to="/pending">权衡</router-link>
+      <router-link to="/confirm">确认</router-link>
     </nav>
     <router-view />
   </div>

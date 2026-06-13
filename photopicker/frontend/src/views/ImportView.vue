@@ -50,7 +50,7 @@
     <!-- Phase 2: Processing with photo wall -->
     <div v-if="phase === 'processing'" class="processing">
       <div class="progress-header">
-        <h3>正在逐帧分析...</h3>
+        <h3>{{ processStatus.status === 'grouping' ? '正在提取特征并分组...' : '正在逐帧分析...' }}</h3>
         <button class="stop-btn" @click="stopProcess">停止</button>
       </div>
       <div class="progress-bar">
@@ -58,16 +58,18 @@
       </div>
       <div class="progress-info">
         <span>{{ processStatus.done }} / {{ processStatus.total }}</span>
-        <span>建议淘汰: {{ processStatus.rejected_count }} 张</span>
-        <span v-if="eta">预计剩余: {{ eta }}</span>
+        <span v-if="processStatus.status === 'grouping'" class="grouping-tag">正在分组...</span>
+        <span v-else>建议淘汰: {{ processStatus.rejected_count }} 张</span>
+        <span v-if="eta && processStatus.status !== 'grouping'">预计剩余: {{ eta }}</span>
       </div>
       <div class="photo-wall">
         <div v-for="ev in recentEvents" :key="ev.id"
-             class="wall-cell" :class="{ rejected: ev.rejected, ok: !ev.rejected }">
+             class="wall-cell" :class="{ rejected: ev.rejected, ok: !ev.rejected, grouping: ev.phase === 'grouping' }">
           <img :src="'/api/thumbnail/' + ev.id" loading="lazy" />
           <div class="wall-overlay">
             <span class="wall-score">{{ ev.score }}</span>
             <span v-if="ev.rejected" class="wall-reason">{{ ev.reasons[0] || '建议淘汰' }}</span>
+            <span v-if="ev.phase === 'grouping'" class="wall-grouping">分组中</span>
           </div>
         </div>
       </div>
@@ -243,10 +245,13 @@ async function doReset() {
 .wall-cell { position: relative; border-radius: 6px; overflow: hidden; border: 2px solid transparent; animation: fadeIn 0.3s ease-out; }
 .wall-cell.ok { border-color: #4caf50; }
 .wall-cell.rejected { border-color: #c0392b; }
+.wall-cell.grouping { border-color: #3498db; }
 .wall-cell img { width: 100%; height: 80px; object-fit: cover; }
 .wall-overlay { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.7); padding: 2px 4px; display: flex; justify-content: space-between; align-items: center; }
 .wall-score { color: #fff; font-size: 0.7rem; }
 .wall-reason { color: #ff9800; font-size: 0.65rem; }
+.wall-grouping { color: #3498db; font-size: 0.65rem; }
+.grouping-tag { color: #3498db; font-weight: 600; }
 @keyframes fadeIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
 .done { text-align: center; padding: 3rem 0; }
 .done-stats { margin: 1rem 0; }

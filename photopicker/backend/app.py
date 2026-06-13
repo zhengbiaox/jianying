@@ -137,13 +137,26 @@ def import_folder(folder_path: str):
 def reset_all():
     global session_state, current_folder, cache_dir, photos_db, groups_db
 
-    if cache_dir and os.path.exists(cache_dir):
-        shutil.rmtree(cache_dir, ignore_errors=True)
+    # Try to find cache folder from current_folder
+    target_folder = current_folder
+    if not target_folder:
+        # If no current_folder, try to find it from session_state
+        if session_state and session_state.folder:
+            target_folder = session_state.folder
 
-    if current_folder:
-        state_file = os.path.join(current_folder, ".photopicker_state.json")
+    if target_folder:
+        # Delete .photopicker_cache folder
+        cache_path = os.path.join(target_folder, ".photopicker_cache")
+        if os.path.exists(cache_path):
+            shutil.rmtree(cache_path, ignore_errors=True)
+        # Delete state file
+        state_file = os.path.join(target_folder, ".photopicker_state.json")
         if os.path.exists(state_file):
             os.remove(state_file)
+
+    # Also try cache_dir if set
+    if cache_dir and os.path.exists(cache_dir):
+        shutil.rmtree(cache_dir, ignore_errors=True)
 
     photos_db.clear()
     groups_db.clear()
@@ -214,7 +227,7 @@ def run_detection():
             if img is None:
                 progress_state["done"] += 1
                 continue
-            result = detect_quality_with_face(img)
+            result = detect_quality_with_face(img, photo.path)
             photo.score = result["score"]
             photo.grade = PhotoGrade(result["grade"])
         except Exception:
@@ -867,6 +880,11 @@ def get_runtime():
     info["preference"] = runtime_preference
     return info
 
+@app.get("/api/models")
+def get_models():
+    from photopicker.backend.vision import get_model_status
+    return get_model_status()
+
 @app.post("/api/runtime")
 def set_runtime(preference: str = "auto"):
     global runtime_preference
@@ -1034,7 +1052,7 @@ def _run_auto_process(folder_path, filter_level, runtime):
                 img = cv2.imread(path)
                 if img is None:
                     return photo_id, None
-                result = detect_quality_with_face(img)
+                result = detect_quality_with_face(img, path)
                 return photo_id, result
             except Exception:
                 return photo_id, None
@@ -1071,15 +1089,19 @@ def _run_auto_process(folder_path, filter_level, runtime):
                         process_state["rejected_count"] += 1
 
         if not process_cancel.is_set():
+            # Phase 2: Grouping
+            process_state["status"] = "grouping"
+            process_state["label"] = "正在提取特征并分组..."
+
             photo_paths = {pid: p.path for pid, p in photos_db.items()}
-            # Extract timestamps for better grouping
             timestamps = {}
             from PIL import Image as PILImage
+
             for pid, path in photo_paths.items():
                 try:
                     img = PILImage.open(path)
                     exif = img._getexif() or {}
-                    dt_str = exif.get(36867) or exif.get(306)  # DateTimeOriginal or DateTime
+                    dt_str = exif.get(36867) or exif.get(306)
                     if dt_str:
                         from datetime import datetime
                         dt = datetime.strptime(str(dt_str).strip(), "%Y:%m:%d %H:%M:%S")
@@ -1087,6 +1109,41 @@ def _run_auto_process(folder_path, filter_level, runtime):
                     img.close()
                 except Exception:
                     pass
+
+            from photopicker.backend.vision import extract_clip_features, extract_dinov2_features
+
+            clip_features = {}
+            dinov2_features = {}
+            total_photos = len(photo_paths)
+            process_state["done"] = 0
+            process_state["total"] = total_photos
+
+            for i, (pid, path) in enumerate(photo_paths.items()):
+                if process_cancel.is_set():
+                    process_state["status"] = "stopped"
+                    return
+
+                clip_feat = extract_clip_features(path)
+                dinov2_feat = extract_dinov2_features(path)
+
+                if clip_feat is not None:
+                    clip_features[pid] = clip_feat
+                if dinov2_feat is not None:
+                    dinov2_features[pid] = dinov2_feat
+
+                process_state["done"] = i + 1
+                process_state["current_photo"] = os.path.basename(path)
+
+                process_state["events"].append({
+                    "id": pid,
+                    "name": os.path.basename(path),
+                    "score": photos_db[pid].score if pid in photos_db else 0,
+                    "rejected": False,
+                    "reasons": [],
+                    "phase": "grouping"
+                })
+
+            process_state["label"] = "正在聚类分组..."
             grouped = group_photos(photo_paths, timestamps=timestamps, threshold=0.50)
             groups_db.clear()
             for group_id, photo_ids in grouped.items():
@@ -1098,7 +1155,6 @@ def _run_auto_process(folder_path, filter_level, runtime):
                         photos_db[pid].scene_group = group_id
             process_state["groups_count"] = len(groups_db)
 
-            # Sort photos within each group by quality score (highest first)
             for gid, group in groups_db.items():
                 group.photos.sort(key=lambda pid: photos_db[pid].score if pid in photos_db else 0, reverse=True)
 

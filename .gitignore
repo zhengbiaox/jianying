@@ -1,6 +1,32 @@
-node_modules/
+# Python
 __pycache__/
 *.pyc
-.env
+*.pyo
+*.pyd
+.Python
+*.egg-info/
 dist/
 build/
+.eggs/
+*.egg
+
+# Node
+node_modules/
+frontend/dist/
+
+# 环境
+.env
+.venv/
+venv/
+env/
+
+# 缓存
+.photopicker_cache/
+*.log
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 模型缓存
+.cache/

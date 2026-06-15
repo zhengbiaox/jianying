@@ -207,6 +207,7 @@ def test_pair_similarity_identical():
         "ahash": "abcd1234abcd1234",
         "color_hist": np.ones(144, dtype=np.float32) / 12.0,
         "timestamp": 1000.0,
+        "exif_meta": {"camera": "Canon EOS R5", "lens": "RF 50mm", "focal_length": "50", "aperture": "f/1.8"},
     }
     s = pair_similarity(info, info)
     assert s > 0.99

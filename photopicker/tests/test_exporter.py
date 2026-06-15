@@ -40,8 +40,8 @@ def test_export_winners_losers_copy():
             folder=srcdir, winners=[os.path.join(srcdir, "a.jpg")],
             losers=[os.path.join(srcdir, "b.jpg")], mode="copy"
         )
-        assert os.path.exists(os.path.join(srcdir, "winners", "a.jpg"))
-        assert os.path.exists(os.path.join(srcdir, "losers", "b.jpg"))
+        assert os.path.exists(os.path.join(srcdir, "入选", "a.jpg"))
+        assert os.path.exists(os.path.join(srcdir, "未入选", "b.jpg"))
         assert os.path.exists(os.path.join(srcdir, "a.jpg"))
 
 
@@ -54,5 +54,5 @@ def test_export_winners_losers_move():
         result = export_winners_losers(
             folder=srcdir, winners=[a], losers=[b], mode="move"
         )
-        assert os.path.exists(os.path.join(srcdir, "winners", "a.jpg"))
+        assert os.path.exists(os.path.join(srcdir, "入选", "a.jpg"))
         assert not os.path.exists(a)

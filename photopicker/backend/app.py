@@ -51,7 +51,7 @@ REASON_CN = {
     "tiny_file": "文件体积偏小",
 }
 
-app = FastAPI(title="PhotoPicker")
+app = FastAPI(title="拣影")
 
 app.add_middleware(
     CORSMiddleware,
@@ -60,8 +60,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.on_event("startup")
+async def startup_event():
+    from photopicker.backend.vision import preload_models
+    preload_models()
+
 photos_db: dict[str, PhotoInfo] = {}
 groups_db: dict[str, SceneGroup] = {}
+face_groups_db: dict[str, SceneGroup] = {}
 raw_pair_db: dict[str, str | None] = {}
 current_folder: str = ""
 clip_model = None
@@ -160,6 +167,7 @@ def reset_all():
 
     photos_db.clear()
     groups_db.clear()
+    face_groups_db.clear()
     session_state = None
     current_folder = ""
     cache_dir = ""
@@ -254,6 +262,7 @@ def run_aesthetic():
 def run_grouping(threshold: float = 0.38):
     global session_state
     groups_db.clear()
+    face_groups_db.clear()
 
     progress_state["status"] = "grouping"
     progress_state["done"] = 0
@@ -304,6 +313,11 @@ def run_grouping(threshold: float = 0.38):
 @app.get("/api/groups")
 def get_groups():
     return list(groups_db.values())
+
+
+@app.get("/api/face_groups")
+def get_face_groups():
+    return list(face_groups_db.values())
 
 
 def advance_group(group: GroupState, action: str) -> dict:
@@ -1038,28 +1052,17 @@ def _run_auto_process(folder_path, filter_level, runtime):
 
         process_state["total"] = len(photo_list)
 
+        # Single pass: extract quality + grouping features in one load per photo
+        from photopicker.backend.grouper import process_single_photo
         from concurrent.futures import ThreadPoolExecutor, as_completed
-        import cv2
 
-        # --- Phase 1: Quality detection ---
-        # OpenCV/MediaPipe are C++ libs that release the GIL,
-        # so ThreadPoolExecutor gives real parallelism here (no need for ProcessPool).
         workers = min(8, max(2, (os.cpu_count() or 4)))
 
-        def detect_one(args):
-            photo_id, path = args
-            try:
-                img = cv2.imread(path)
-                if img is None:
-                    return photo_id, None
-                result = detect_quality_with_face(img, path)
-                return photo_id, result
-            except Exception:
-                return photo_id, None
+        processed_results = []
 
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {
-                executor.submit(detect_one, (pid, path)): pid
+                executor.submit(process_single_photo, path, pid): pid
                 for pid, path in photo_list
             }
             for future in as_completed(futures):
@@ -1068,19 +1071,22 @@ def _run_auto_process(folder_path, filter_level, runtime):
                     executor.shutdown(wait=False, cancel_futures=True)
                     return
 
-                photo_id, result = future.result()
+                result = future.result()
+                processed_results.append(result)
                 process_state["done"] += 1
 
-                if result:
-                    photos_db[photo_id].score = result["score"]
-                    photos_db[photo_id].grade = PhotoGrade(result["grade"])
-                    photos_db[photo_id].reasons = [REASON_CN.get(r, r) for r in result.get("reasons", [])]
+                photo_id = result['photo_id']
+                if photo_id in photos_db and result['quality']:
+                    q = result['quality']
+                    photos_db[photo_id].score = q['score']
+                    photos_db[photo_id].grade = PhotoGrade(q['grade'])
+                    photos_db[photo_id].reasons = [REASON_CN.get(r, r) for r in q.get('reasons', [])]
 
-                    rejected = result["score"] < filter_level
+                    rejected = q['score'] < filter_level
                     process_state["events"].append({
                         "id": photo_id,
                         "name": os.path.basename(photos_db[photo_id].path),
-                        "score": result["score"],
+                        "score": q['score'],
                         "rejected": rejected,
                         "reasons": photos_db[photo_id].reasons,
                     })
@@ -1088,63 +1094,14 @@ def _run_auto_process(folder_path, filter_level, runtime):
                     if rejected:
                         process_state["rejected_count"] += 1
 
+        # Phase 2: Grouping (visual display phase — features already extracted)
         if not process_cancel.is_set():
-            # Phase 2: Grouping
             process_state["status"] = "grouping"
-            process_state["label"] = "正在提取特征并分组..."
-
-            photo_paths = {pid: p.path for pid, p in photos_db.items()}
-            timestamps = {}
-            from PIL import Image as PILImage
-
-            for pid, path in photo_paths.items():
-                try:
-                    img = PILImage.open(path)
-                    exif = img._getexif() or {}
-                    dt_str = exif.get(36867) or exif.get(306)
-                    if dt_str:
-                        from datetime import datetime
-                        dt = datetime.strptime(str(dt_str).strip(), "%Y:%m:%d %H:%M:%S")
-                        timestamps[pid] = dt.timestamp()
-                    img.close()
-                except Exception:
-                    pass
-
-            from photopicker.backend.vision import extract_clip_features, extract_dinov2_features
-
-            clip_features = {}
-            dinov2_features = {}
-            total_photos = len(photo_paths)
-            process_state["done"] = 0
-            process_state["total"] = total_photos
-
-            for i, (pid, path) in enumerate(photo_paths.items()):
-                if process_cancel.is_set():
-                    process_state["status"] = "stopped"
-                    return
-
-                clip_feat = extract_clip_features(path)
-                dinov2_feat = extract_dinov2_features(path)
-
-                if clip_feat is not None:
-                    clip_features[pid] = clip_feat
-                if dinov2_feat is not None:
-                    dinov2_features[pid] = dinov2_feat
-
-                process_state["done"] = i + 1
-                process_state["current_photo"] = os.path.basename(path)
-
-                process_state["events"].append({
-                    "id": pid,
-                    "name": os.path.basename(path),
-                    "score": photos_db[pid].score if pid in photos_db else 0,
-                    "rejected": False,
-                    "reasons": [],
-                    "phase": "grouping"
-                })
-
             process_state["label"] = "正在聚类分组..."
-            grouped = group_photos(photo_paths, timestamps=timestamps, threshold=0.50)
+            process_state["done"] = 0
+            process_state["total"] = len(processed_results)
+
+            grouped = group_photos({}, precomputed_infos=processed_results, threshold=0.50)
             groups_db.clear()
             for group_id, photo_ids in grouped.items():
                 groups_db[group_id] = SceneGroup(
@@ -1158,8 +1115,22 @@ def _run_auto_process(folder_path, filter_level, runtime):
             for gid, group in groups_db.items():
                 group.photos.sort(key=lambda pid: photos_db[pid].score if pid in photos_db else 0, reverse=True)
 
+            process_state["done"] = len(processed_results)
+
+        # Phase 3: Face clustering
+        if not process_cancel.is_set():
+            from photopicker.backend.grouper import cluster_faces
+            face_groups = cluster_faces(processed_results)
+            face_groups_db.clear()
+            for group_id, photo_ids in face_groups.items():
+                face_groups_db[group_id] = SceneGroup(
+                    id=group_id, photos=photo_ids, cover_photo_id=photo_ids[0]
+                )
+                for pid in photo_ids:
+                    if pid in photos_db:
+                        photos_db[pid].face_group = group_id
+
         # Single-photo groups: do NOT auto-select, let user decide in PK
-        # They will be handled as "single mode" in the PK view
 
         # Sync groups to session_state for undo support
         group_states = []
@@ -1169,8 +1140,6 @@ def _run_auto_process(folder_path, filter_level, runtime):
                 images=list(group.photos),
             )
             if len(group.photos) == 1:
-                # Single photo: put in left slot, right stays empty
-                # User decides in PK view (single mode)
                 gs.left = group.photos[0]
                 gs.right = None
                 gs.pending = []

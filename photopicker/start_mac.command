@@ -1,97 +1,74 @@
-#!/bin/bash
-# PhotoPicker macOS 一键启动脚本
+#!/usr/bin/env bash
+# 拣影 · Mac 启动器
+#
+# 双击运行：自动装 Python + 依赖 + 检查更新 + 启动应用
+# 没装过 Python 也没关系，会用 uv 自动下载一个独立的 Python。
+#
+# 第一次提示「无法打开，因为它来自身份不明的开发者」时：
+#   右键（或按住 control 点击）→ 打开 → 在弹窗里再点「打开」即可，
+#   之后双击就能直接运行。
 
 set -e
+export LC_ALL="${LC_ALL:-en_US.UTF-8}"
+export LANG="${LANG:-en_US.UTF-8}"
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPT_DIR"
+cd "$(dirname "$0")"
 
-echo "=========================================="
-echo "  PhotoPicker - 本地智能选片工具"
-echo "=========================================="
 echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  拣影 · 启动器"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# 颜色定义
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-# 配置国内镜像源
-PIP_MIRROR="https://mirrors.aliyun.com/pypi/simple/"
-NPM_MIRROR="https://registry.npmmirror.com"
-HF_MIRROR="https://hf-mirror.com"
-
-# 检测Python
-echo "[1/4] 检测Python环境..."
-PYTHON_CMD=""
-if command -v python3 &> /dev/null; then
-    PYTHON_CMD="python3"
-elif command -v python &> /dev/null; then
-    PYTHON_CMD="python"
-else
-    echo -e "${RED}错误: 未找到Python，请先安装Python 3.10+${NC}"
-    echo "下载地址: https://www.python.org/downloads/"
-    exit 1
-fi
-
-PYTHON_VERSION=$($PYTHON_CMD --version 2>&1)
-echo -e "${GREEN}✓ 找到 $PYTHON_VERSION${NC}"
-
-# 检测Node.js
-echo "[2/4] 检测Node.js环境..."
-NODE_CMD=""
-if command -v node &> /dev/null; then
-    NODE_CMD="node"
-    NODE_VERSION=$(node --version 2>&1)
-    echo -e "${GREEN}✓ 找到 Node.js $NODE_VERSION${NC}"
-else
-    echo -e "${YELLOW}警告: 未找到Node.js，前端可能需要手动构建${NC}"
-fi
-
-# 安装Python依赖（使用阿里云镜像）
-echo "[3/4] 检测并安装Python依赖..."
-if [ -f "requirements.txt" ]; then
-    echo "使用国内镜像源安装依赖..."
-    $PYTHON_CMD -m pip install -r requirements.txt -i $PIP_MIRROR --trusted-host mirrors.aliyun.com 2>/dev/null || {
-        echo -e "${YELLOW}正在安装依赖（首次运行需要下载，请耐心等待）...${NC}"
-        $PYTHON_CMD -m pip install -r requirements.txt -i $PIP_MIRROR --trusted-host mirrors.aliyun.com
-    }
-    echo -e "${GREEN}✓ Python依赖已就绪${NC}"
-else
-    echo -e "${RED}错误: 未找到requirements.txt${NC}"
-    exit 1
-fi
-
-# 构建前端（使用淘宝镜像）
-echo "[4/4] 检测前端构建..."
-if [ -d "frontend/dist" ] && [ -f "frontend/dist/index.html" ]; then
-    echo -e "${GREEN}✓ 前端已构建${NC}"
-elif [ -d "frontend" ] && [ -f "frontend/package.json" ]; then
-    if [ -n "$NODE_CMD" ]; then
-        echo "正在构建前端（使用淘宝镜像）..."
-        cd frontend
-        npm config set registry $NPM_MIRROR 2>/dev/null
-        npm install --silent 2>/dev/null
-        npm run build 2>/dev/null
-        cd ..
-        echo -e "${GREEN}✓ 前端构建完成${NC}"
-    else
-        echo -e "${YELLOW}跳过前端构建（需要Node.js）${NC}"
+# ---- 1. 找 / 装 uv（Python 工具链管理器） ----
+find_uv() {
+  if command -v uv &>/dev/null; then
+    echo "uv"
+    return
+  fi
+  for cand in "$HOME/.local/bin/uv" "$HOME/.cargo/bin/uv"; do
+    if [ -x "$cand" ]; then
+      echo "$cand"
+      return
     fi
+  done
+}
+
+UV="$(find_uv || true)"
+if [ -z "$UV" ]; then
+  echo ""
+  echo "[首次准备] 正在下载 uv（Python 工具链，~30MB）..."
+  echo "  这一步只在第一次运行做，之后秒过。"
+  if ! command -v curl &>/dev/null; then
+    echo ""
+    echo "❌ 系统没有 curl 命令，无法下载 uv。"
+    echo "   请打开「终端」执行：xcode-select --install"
+    echo "   装完再双击本启动器。"
+    echo ""
+    read -n 1 -s -r -p "按任意键退出..."
+    exit 1
+  fi
+  # 不加 -s，保留 curl 进度输出，让用户看到下载在动
+  curl -LSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+  UV="$(find_uv || true)"
+  if [ -z "$UV" ]; then
+    echo ""
+    echo "❌ uv 安装失败。"
+    echo "   常见原因：网络不通畅（astral.sh 走海外 CDN），请稍后重试。"
+    echo "   或手动执行：curl -LSf https://astral.sh/uv/install.sh | sh"
+    echo ""
+    read -n 1 -s -r -p "按任意键退出..."
+    exit 1
+  fi
+  echo "  ✓ uv 安装完成"
 fi
 
-echo ""
-echo "=========================================="
-echo "  启动服务..."
-echo "=========================================="
-echo ""
-echo "访问地址: http://localhost:8010"
-echo "按 Ctrl+C 停止服务"
-echo ""
+# 把 uv 自带的 Python 加进 PATH，确保后续 launcher.py 能调到
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 
-# 设置环境变量（HuggingFace镜像）
-export HF_ENDPOINT=$HF_MIRROR
-
-# 启动服务
-$PYTHON_CMD -m uvicorn photopicker.backend.app:app --host 127.0.0.1 --port 8010 --reload
+# ---- 2. 用 uv 跑 launcher.py（uv 自动管理 Python 版本） ----
+# 不加 --quiet：让 uv 下载 Python 的进度直接给用户看
+# --no-project 防止 uv 误把当前目录当 uv 项目去解析 pyproject.toml
+echo ""
+echo "正在准备 Python 环境并启动 launcher..."
+exec "$UV" run --no-project --python ">=3.10" -- python scripts/launcher.py

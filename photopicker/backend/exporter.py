@@ -45,9 +45,10 @@ def export_photos(photo_paths: list[str], raw_paths: dict[str, str],
 
 
 def export_winners_losers(folder: str, winners: list[str], losers: list[str],
-                          mode: str = "copy") -> dict:
-    winners_dir = os.path.join(folder, "winners")
-    losers_dir = os.path.join(folder, "losers")
+                          mode: str = "copy",
+                          raw_paths: dict[str, str | None] | None = None) -> dict:
+    winners_dir = os.path.join(folder, "入选")
+    losers_dir = os.path.join(folder, "未入选")
     os.makedirs(winners_dir, exist_ok=True)
     os.makedirs(losers_dir, exist_ok=True)
     moved = 0
@@ -60,6 +61,15 @@ def export_winners_losers(folder: str, winners: list[str], losers: list[str],
         else:
             shutil.copy2(src, dst)
         _copy_xmp_companion(src, winners_dir, mode)
+        # Copy/move RAW file if exists
+        if raw_paths:
+            raw = raw_paths.get(src)
+            if raw and os.path.exists(raw):
+                raw_dst = os.path.join(winners_dir, os.path.basename(raw))
+                if mode == "move":
+                    shutil.move(raw, raw_dst)
+                else:
+                    shutil.copy2(raw, raw_dst)
         moved += 1
     for src in losers:
         if not os.path.exists(src):
@@ -70,6 +80,15 @@ def export_winners_losers(folder: str, winners: list[str], losers: list[str],
         else:
             shutil.copy2(src, dst)
         _copy_xmp_companion(src, losers_dir, mode)
+        # Copy/move RAW file if exists
+        if raw_paths:
+            raw = raw_paths.get(src)
+            if raw and os.path.exists(raw):
+                raw_dst = os.path.join(losers_dir, os.path.basename(raw))
+                if mode == "move":
+                    shutil.move(raw, raw_dst)
+                else:
+                    shutil.copy2(raw, raw_dst)
         moved += 1
     return {
         "入选": len(winners),

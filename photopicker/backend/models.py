@@ -21,8 +21,11 @@ class PhotoInfo(BaseModel):
     score: int = 0
     grade: PhotoGrade = PhotoGrade.RED
     scene_group: Optional[str] = None
+    face_group: Optional[str] = None
+    face_embeddings: list[list[float]] = []
     is_selected: bool = False
     is_rejected: bool = False
+    is_pending: bool = False
     aesthetic_score: int = 0
     reasons: list[str] = []
 

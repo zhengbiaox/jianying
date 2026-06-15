@@ -96,7 +96,84 @@ def time_similarity(t1: float | None, t2: float | None) -> float:
 
 
 # ---------------------------------------------------------------------------
-# 5. Filename burst detection
+# 5. Face clustering
+# ---------------------------------------------------------------------------
+
+FACE_SIMILARITY_THRESHOLD = 0.6
+
+
+def cosine_similarity(a, b):
+    """Compute cosine similarity between two vectors."""
+    a = np.array(a, dtype=np.float32)
+    b = np.array(b, dtype=np.float32)
+    norm_a = np.linalg.norm(a)
+    norm_b = np.linalg.norm(b)
+    if norm_a < 1e-8 or norm_b < 1e-8:
+        return 0.0
+    return float(np.dot(a, b) / (norm_a * norm_b))
+
+
+def cluster_faces(photo_list: list[dict]) -> dict[str, list[str]]:
+    """Cluster photos by face embeddings using union-find.
+
+    Args:
+        photo_list: List of dicts with 'photo_id' and 'face_embeddings'.
+
+    Returns:
+        {group_id: [photo_ids]} for groups with at least one face.
+    """
+    n = len(photo_list)
+    parent = list(range(n))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(x, y):
+        px, py = find(x), find(y)
+        if px != py:
+            parent[px] = py
+
+    face_indices = []
+    for i, photo in enumerate(photo_list):
+        embeddings = photo.get("face_embeddings", [])
+        if embeddings:
+            face_indices.append((i, embeddings))
+
+    if not face_indices:
+        return {}
+
+    for i, (idx_a, emb_a) in enumerate(face_indices):
+        for j in range(i + 1, len(face_indices)):
+            idx_b, emb_b = face_indices[j]
+            for ea in emb_a:
+                for eb in emb_b:
+                    if cosine_similarity(ea, eb) >= FACE_SIMILARITY_THRESHOLD:
+                        union(idx_a, idx_b)
+                        break
+                else:
+                    continue
+                break
+
+    clusters = {}
+    for idx, embeddings in face_indices:
+        root = find(idx)
+        if root not in clusters:
+            clusters[root] = []
+        clusters[root].append(photo_list[idx]["photo_id"])
+
+    result = {}
+    for root, members in clusters.items():
+        group_id = f"face_{root}"
+        result[group_id] = members
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 6. Filename burst detection
 # ---------------------------------------------------------------------------
 
 BURST_NUMBER_DELTA = 3
@@ -242,12 +319,61 @@ def pair_similarity(info_a: dict, info_b: dict) -> float:
     else:
         sim_name = 0.0
 
-    sim = (
-        0.35 * sim_hash
-        + 0.20 * sim_color
-        + 0.25 * sim_time
-        + 0.20 * sim_name
-    )
+    # CLIP similarity (if available)
+    clip_a = info_a.get('clip_features')
+    clip_b = info_b.get('clip_features')
+    if clip_a is not None and clip_b is not None:
+        sim_clip = float(np.dot(clip_a, clip_b))
+        sim_clip = max(0.0, min(1.0, sim_clip))
+    else:
+        sim_clip = 0.0
+
+    # DINOv2 similarity (if available)
+    dino_a = info_a.get('dinov2_features')
+    dino_b = info_b.get('dinov2_features')
+    if dino_a is not None and dino_b is not None:
+        sim_dino = float(np.dot(dino_a, dino_b))
+        sim_dino = max(0.0, min(1.0, sim_dino))
+    else:
+        sim_dino = 0.0
+
+    # Weighted fusion (adjust weights if models available)
+    has_clip = clip_a is not None and clip_b is not None
+    has_dino = dino_a is not None and dino_b is not None
+
+    if has_clip and has_dino:
+        sim = (
+            0.20 * sim_hash
+            + 0.10 * sim_color
+            + 0.15 * sim_time
+            + 0.08 * sim_name
+            + 0.20 * sim_clip
+            + 0.20 * sim_dino
+        )
+    elif has_clip:
+        sim = (
+            0.25 * sim_hash
+            + 0.12 * sim_color
+            + 0.18 * sim_time
+            + 0.08 * sim_name
+            + 0.27 * sim_clip
+        )
+    elif has_dino:
+        sim = (
+            0.25 * sim_hash
+            + 0.12 * sim_color
+            + 0.18 * sim_time
+            + 0.08 * sim_name
+            + 0.27 * sim_dino
+        )
+    else:
+        sim = (
+            0.35 * sim_hash
+            + 0.20 * sim_color
+            + 0.25 * sim_time
+            + 0.20 * sim_name
+        )
+
     return max(0.0, min(1.0, sim))
 
 
@@ -351,30 +477,117 @@ def split_oversized(
 # 10. Main grouping function
 # ---------------------------------------------------------------------------
 
+def process_single_photo(img_path: str, photo_id: str) -> dict:
+    """Process a single photo: extract quality info AND grouping features.
+    Returns dict with quality info and features for grouping."""
+    result = {
+        'photo_id': photo_id,
+        'path': img_path,
+        'quality': None,
+        'hashes': {},
+        'color_hist': None,
+        'clip_features': None,
+        'dinov2_features': None,
+        'timestamp': None,
+        'face_embeddings': [],
+    }
+
+    try:
+        img = cv2.imread(img_path)
+        if img is None:
+            return result
+
+        from photopicker.backend.detector import detect_quality_with_face
+        result['quality'] = detect_quality_with_face(img, img_path)
+
+        pil_img = Image.open(img_path).convert('RGB')
+        pil_img.thumbnail((512, 512), Image.Resampling.LANCZOS)
+        result['hashes'] = {
+            'phash': str(imagehash.phash(pil_img, hash_size=8)),
+            'dhash': str(imagehash.dhash(pil_img, hash_size=8)),
+            'whash': str(imagehash.whash(pil_img, hash_size=8)),
+            'ahash': str(imagehash.average_hash(pil_img, hash_size=8)),
+        }
+
+        result['color_hist'] = compute_color_hist(img_path)
+
+        try:
+            exif = pil_img._getexif() or {}
+            dt_str = exif.get(36867) or exif.get(306)
+            if dt_str:
+                from datetime import datetime
+                dt = datetime.strptime(str(dt_str).strip(), "%Y:%m:%d %H:%M:%S")
+                result['timestamp'] = dt.timestamp()
+        except Exception:
+            pass
+
+        from photopicker.backend.vision import extract_clip_features, extract_dinov2_features, detect_faces
+        result['clip_features'] = extract_clip_features(img_path)
+        result['dinov2_features'] = extract_dinov2_features(img_path)
+
+        faces = detect_faces(img_path)
+        if faces:
+            result['face_embeddings'] = [f['embedding'].tolist() if hasattr(f['embedding'], 'tolist') else list(f['embedding']) for f in faces]
+
+    except Exception:
+        pass
+
+    return result
+
+
 def group_photos(
     photo_paths: dict[str, str],
     timestamps: dict[str, float] | None = None,
     threshold: float = 0.50,
+    precomputed_infos: list[dict] | None = None,
 ) -> dict[str, list[str]]:
     """Group photos by multi-signal similarity.
 
     Returns: ``{group_id: [photo_ids]}``
+
+    If ``precomputed_infos`` is provided, uses those instead of re-extracting features.
     """
     timestamps = timestamps or {}
 
-    file_infos = []
-    photo_ids = list(photo_paths.keys())
-    for pid in photo_ids:
-        path = photo_paths[pid]
-        info: dict = {
-            "id": pid,
-            "path": path,
-            "timestamp": timestamps.get(pid),
-        }
-        hashes = compute_hashes(path)
-        info.update(hashes)
-        info["color_hist"] = compute_color_hist(path)
-        file_infos.append(info)
+    if precomputed_infos is not None:
+        file_infos = []
+        for info in precomputed_infos:
+            fi: dict = {
+                "id": info["photo_id"],
+                "path": info["path"],
+                "timestamp": info.get("timestamp"),
+                "phash": info["hashes"].get("phash"),
+                "dhash": info["hashes"].get("dhash"),
+                "whash": info["hashes"].get("whash"),
+                "ahash": info["hashes"].get("ahash"),
+                "color_hist": info.get("color_hist"),
+                "clip_features": info.get("clip_features"),
+                "dinov2_features": info.get("dinov2_features"),
+            }
+            file_infos.append(fi)
+        photo_ids = [info["photo_id"] for info in precomputed_infos]
+    else:
+        file_infos = []
+        photo_ids = list(photo_paths.keys())
+        for pid in photo_ids:
+            path = photo_paths[pid]
+            info: dict = {
+                "id": pid,
+                "path": path,
+                "timestamp": timestamps.get(pid),
+            }
+            hashes = compute_hashes(path)
+            info.update(hashes)
+            info["color_hist"] = compute_color_hist(path)
+            file_infos.append(info)
+
+        try:
+            from photopicker.backend.vision import extract_clip_features, extract_dinov2_features
+            for info in file_infos:
+                info['clip_features'] = extract_clip_features(info['path'])
+                info['dinov2_features'] = extract_dinov2_features(info['path'])
+        except Exception:
+            pass
 
     n = len(file_infos)
     if n == 0:

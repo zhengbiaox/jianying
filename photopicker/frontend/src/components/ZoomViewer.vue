@@ -13,7 +13,12 @@
         <div class="zoom-label">左侧</div>
       </div>
       <div class="zoom-side" v-if="rightSrc">
-        <div class="zoom-viewport" ref="rightViewport">
+        <div class="zoom-viewport" ref="rightViewport"
+             @wheel.prevent="onWheel"
+             @mousedown="onMouseDown"
+             @mousemove="onMouseMove"
+             @mouseup="onMouseUp"
+             @mouseleave="onMouseUp">
           <img :src="rightSrc" :style="transformStyle" draggable="false" />
         </div>
         <div class="zoom-label">右侧</div>

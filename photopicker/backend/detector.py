@@ -1,3 +1,4 @@
+import os
 import cv2
 import numpy as np
 from photopicker.backend.models import PhotoGrade
@@ -302,6 +303,31 @@ def score_to_grade(score: int, threshold: int = 60) -> PhotoGrade:
     else:
         return PhotoGrade.RED
 
+
+def detect_screenshot(img: np.ndarray, img_path: str = None) -> dict:
+    """Detect screenshots and small images based on resolution and filename rules."""
+    result = {"is_screenshot": False, "is_small": False, "reasons": []}
+    h, w = img.shape[:2]
+
+    if w < 800 or h < 600:
+        result["is_small"] = True
+        result["reasons"].append("small_image")
+
+    aspect = max(w, h) / max(min(w, h), 1)
+    if aspect > 3.0 or aspect < 0.34:
+        result["reasons"].append("unusual_aspect_ratio")
+
+    if img_path:
+        name_lower = os.path.basename(img_path).lower()
+        if any(kw in name_lower for kw in ["screenshot", "截图", "screen_shot"]):
+            result["is_screenshot"] = True
+            result["reasons"].append("screenshot_filename")
+
+    if result["reasons"]:
+        result["is_screenshot"] = True
+    return result
+
+
 def detect_quality_with_reasons(img: np.ndarray) -> dict:
     enhanced = detect_quality_enhanced(img)
     reasons = list(enhanced["reasons"])
@@ -377,23 +403,56 @@ def detect_faces(img: np.ndarray) -> list[dict]:
         return []
 
 
-def detect_quality_with_face(img: np.ndarray) -> dict:
+def detect_quality_with_face(img: np.ndarray, img_path: str = None) -> dict:
     """Quality detection including face analysis with enhanced metrics."""
     result = detect_quality_with_reasons(img)
     enhanced = detect_quality_enhanced(img)
     result["blur_combined"] = enhanced["blur_combined"]
     result["salient_sharpness"] = enhanced["salient_sharpness"]
     result["horizon_tilt"] = enhanced["horizon_tilt"]
-    faces = detect_faces(img)
-    result["faces"] = faces
-    result["face_count"] = len(faces)
 
-    if faces:
-        closed_eyes = any(f["eyes_closed"] for f in faces)
-        if closed_eyes:
-            if "closed_eyes" not in result["reasons"]:
-                result["reasons"].append("closed_eyes")
-            result["score"] = max(0, result["score"] - 30)
-            result["grade"] = score_to_grade(result["score"]).value
+    # Screenshot/small image detection
+    screenshot_info = detect_screenshot(img, img_path)
+    if screenshot_info["reasons"]:
+        for reason in screenshot_info["reasons"]:
+            if reason not in result["reasons"]:
+                result["reasons"].append(reason)
+        result["score"] = max(0, result["score"] - 20)
+        result["grade"] = score_to_grade(result["score"]).value
+
+    # Try InsightFace first, fall back to MediaPipe
+    insightface_used = False
+    if img_path:
+        try:
+            from photopicker.backend.vision import detect_faces as if_detect_faces, detect_closed_eyes
+            faces = if_detect_faces(img_path)
+            if faces:
+                insightface_used = True
+                result["face_count"] = len(faces)
+                result["faces"] = [{"bbox": {"x": int(f['bbox'][0]), "y": int(f['bbox'][1]),
+                                             "w": int(f['bbox'][2] - f['bbox'][0]),
+                                             "h": int(f['bbox'][3] - f['bbox'][1])},
+                                    "eyes_closed": False, "score": f['score']} for f in faces]
+                closed = detect_closed_eyes(img_path)
+                if closed and 'closed_eyes' not in result['reasons']:
+                    result['reasons'].append('closed_eyes')
+                    result['score'] = max(0, result['score'] - 30)
+                    result['grade'] = score_to_grade(result['score']).value
+        except Exception:
+            pass
+
+    # Fall back to MediaPipe if InsightFace not available
+    if not insightface_used:
+        faces = detect_faces(img)
+        result["faces"] = faces
+        result["face_count"] = len(faces)
+
+        if faces:
+            closed_eyes = any(f["eyes_closed"] for f in faces)
+            if closed_eyes:
+                if "closed_eyes" not in result["reasons"]:
+                    result["reasons"].append("closed_eyes")
+                result["score"] = max(0, result["score"] - 30)
+                result["grade"] = score_to_grade(result["score"]).value
 
     return result

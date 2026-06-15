@@ -1,12 +1,27 @@
+# 拣影 - 依赖清单
+# 与 scripts/launcher.py 中的 CORE_PACKAGES 保持一致
+
+# 核心依赖
 fastapi
 uvicorn[standard]
+pydantic>=2.0
 opencv-python-headless
-Pillow
-pillow-heif
+Pillow>=10.0
+pillow-heif>=0.16
+numpy>=1.26
+imagehash>=4.3
+rawpy>=0.18
 mediapipe
+
+# 完整模式 / AI增强模式
+torch>=2.2
+torchvision>=0.17
 open-clip-torch
-torch
-torchvision
-rawpy
-numpy
+transformers>=4.40
+huggingface-hub
+safetensors
 scikit-learn
+
+# AI增强模式
+insightface>=0.7
+onnxruntime>=1.16

@@ -2,7 +2,7 @@
   <div class="import-view">
     <!-- Phase 1: Directory selection -->
     <div v-if="phase === 'select'">
-      <h2>PhotoPicker</h2>
+      <h2>拣影</h2>
       <div class="browser">
         <div class="browser-path">
           <span class="path-label">当前路径:</span>

@@ -1,15 +1,15 @@
 # 拣影 📸
 
-本地智能选片工具，帮你从几百张照片中快速挑出最好的。
+本地智能选片工具
 
 ## ✨ 功能特性
 
-- 🎯 **智能分组** - 自动识别同一场景的照片（CLIP + DINOv2 + pHash 多信号融合）
-- 🔍 **质量检测** - 自动检测模糊、过曝、欠曝、闭眼、地平线歪斜
-- ⚔️ **PK选片** - 左右对比，快捷键操作，高效筛选
-- 🎬 **进度持久化** - 随时中断，下次继续
-- 📁 **RAW支持** - 支持 JPG + RAW + HEIC 格式
-- 🖥️ **跨平台** - Windows / macOS 一键启动
+- 🎯 **智能分组** -
+- 🔍 **质量检测** - 
+- ⚔️ **PK选片** - 
+- 🎬 **进度持久化** - 
+- 📁 **RAW支持** - 
+- 🖥️ **跨平台** -
 
 ## 🚀 快速开始
 
@@ -42,9 +42,9 @@ python -m uvicorn photopicker.backend.app:app --port 8010
 photopicker/
 ├── backend/
 │   ├── app.py          # FastAPI 主入口
-│   ├── grouper.py      # 分组算法（CLIP + pHash + 时间 + EXIF）
-│   ├── detector.py     # 质量检测（模糊/曝光/闭眼等）
-│   ├── vision.py       # AI模型管理（CLIP/DINOv2/InsightFace）
+│   ├── grouper.py      # 分组算法
+│   ├── detector.py     # 质量检测
+│   ├── vision.py       # AI模型管理
 │   ├── exporter.py     # 导出逻辑
 │   └── models.py       # 数据模型
 ├── frontend/

@@ -23,6 +23,7 @@ class PhotoInfo(BaseModel):
     scene_group: Optional[str] = None
     face_group: Optional[str] = None
     face_embeddings: list[list[float]] = []
+    person_name: Optional[str] = None
     is_selected: bool = False
     is_rejected: bool = False
     is_pending: bool = False
@@ -58,6 +59,7 @@ class GroupState(BaseModel):
     left: Optional[str] = None
     right: Optional[str] = None
     losers: list[str] = []
+    held: list[str] = []
     winner: Optional[str] = None
     extra_winners: list[str] = []
     finished: bool = False
@@ -72,6 +74,7 @@ class GroupState(BaseModel):
             "right": self.right,
             "pending": list(self.pending),
             "losers": list(self.losers),
+            "held": list(self.held),
             "winner": self.winner,
             "extra_winners": list(self.extra_winners),
             "finished": self.finished,
@@ -85,6 +88,7 @@ class GroupState(BaseModel):
         self.right = snap["right"]
         self.pending = snap["pending"]
         self.losers = snap["losers"]
+        self.held = snap.get("held", [])
         self.winner = snap["winner"]
         self.extra_winners = snap["extra_winners"]
         self.finished = snap["finished"]

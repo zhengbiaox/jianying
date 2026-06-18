@@ -19,6 +19,14 @@
         <div class="folder-preview" v-if="preview">
           <p>        已识别 <strong>{{ preview.count }}</strong> 张照片，共 <strong>{{ preview.size_mb }} MB</strong></p>
         </div>
+        <div v-if="existingCache && existingCache.has_cache" class="cache-warning">
+          <p>⚠️ 检测到已有处理记录</p>
+          <p class="cache-detail">
+            缓存文件夹: {{ existingCache.cache_dir ? '有' : '无' }}
+            · 输出文件夹: {{ existingCache.output_dir ? '有' : '无' }}
+          </p>
+          <button class="clear-cache-btn" @click="clearCache">清除旧记录，重新开始</button>
+        </div>
       </div>
       <div class="options">
         <div class="option-group">
@@ -107,6 +115,7 @@ const currentPath = ref('')
 const parentPath = ref('')
 const dirs = ref([])
 const preview = ref(null)
+const existingCache = ref(null)
 const runtime = ref('auto')
 const filterLevel = ref('60')
 const processStatus = ref({ done: 0, total: 0, rejected_count: 0, groups_count: 0, events: [] })
@@ -136,10 +145,15 @@ async function browse(path = '') {
     parentPath.value = res.data.parent
     dirs.value = res.data.dirs
     preview.value = null
+    existingCache.value = null
     if (currentPath.value) {
       try {
         const pv = await axios.post('/api/preview_folder', null, { params: { folder_path: currentPath.value } })
         preview.value = pv.data
+      } catch {}
+      try {
+        const cv = await axios.get('/api/check_cache', { params: { folder_path: currentPath.value } })
+        existingCache.value = cv.data
       } catch {}
     }
   } catch (e) { alert('无法读取目录: ' + e.message) }
@@ -210,6 +224,18 @@ async function doReset() {
     alert('重置失败: ' + e.message)
   }
 }
+
+async function clearCache() {
+  if (!currentPath.value) return
+  if (!confirm('确定要清除该目录下的旧记录吗？')) return
+  try {
+    await axios.post('/api/clear_cache', null, { params: { folder_path: currentPath.value } })
+    existingCache.value = null
+    alert('已清除旧记录')
+  } catch (e) {
+    alert('清除失败: ' + e.message)
+  }
+}
 </script>
 
 <style scoped>
@@ -262,4 +288,9 @@ async function doReset() {
 .reset-btn { padding: 0.5rem 1.5rem; background: #c0392b; color: #fff; border: none; border-radius: 8px; cursor: pointer; }
 .reset-btn:hover { background: #e74c3c; }
 .reset-hint { color: #666; font-size: 0.8rem; margin-top: 0.5rem; }
+.cache-warning { margin-top: 1rem; padding: 1rem; background: #7d6608; border-radius: 8px; }
+.cache-warning p { color: #fff; margin-bottom: 0.5rem; }
+.cache-detail { color: #ddd; font-size: 0.85rem; }
+.clear-cache-btn { padding: 0.5rem 1rem; background: #c0392b; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; }
+.clear-cache-btn:hover { background: #e74c3c; }
 </style>

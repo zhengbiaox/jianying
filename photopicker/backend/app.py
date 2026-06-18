@@ -24,7 +24,7 @@ from photopicker.backend.models import (
 from photopicker.backend.scanner import scan_folder, pair_jpg_raw
 from photopicker.backend.grouper import group_photos
 from photopicker.backend.detector import detect_blur, detect_exposure, detect_shake, calculate_score, score_to_grade, detect_quality_with_reasons, detect_quality_with_face
-from photopicker.backend.exporter import export_photos, export_winners_losers
+from photopicker.backend.exporter import export_photos, export_winners_losers, export_by_person, export_by_group
 from photopicker.backend.state import save_session, load_session
 from photopicker.backend.cache import get_thumbnail as get_cached_thumbnail
 from photopicker.backend.runtime import get_device, device_info
@@ -328,8 +328,10 @@ def advance_group(group: GroupState, action: str) -> dict:
     - 'right': right is selected, left is eliminated. Both slots refilled from pending.
     - 'both': both are selected. Both slots refilled from pending.
     - 'none': both are eliminated. Both slots refilled from pending.
+    - 'hold': both are held for later review. Both slots refilled from pending.
     - 'keep': (single mode) keep the photo as winner.
     - 'reject': (single mode) reject the photo.
+    - 'hold': (single mode) hold the photo for later review.
     """
     result = {'action': action, 'finished': False, 'winners': []}
 
@@ -353,6 +355,21 @@ def advance_group(group: GroupState, action: str) -> dict:
         group.right = None
         group.finished = True
         result['finished'] = True
+        return result
+
+    if action == 'hold':
+        # Single mode: hold the photo for later review
+        held_photo = group.left or group.right
+        if held_photo:
+            group.auto_selected = False
+            if not hasattr(group, 'held'):
+                group.held = []
+            group.held.append(held_photo)
+        group.left = None
+        group.right = None
+        group.finished = True
+        result['finished'] = True
+        result['held'] = [held_photo] if held_photo else []
         return result
 
     # Multi-photo elimination pairing
@@ -392,6 +409,16 @@ def advance_group(group: GroupState, action: str) -> dict:
             group.losers.append(group.right)
         group.left = None
         group.right = None
+    elif action == 'hold':
+        # Both held for later review
+        if not hasattr(group, 'held'):
+            group.held = []
+        if group.left:
+            group.held.append(group.left)
+        if group.right:
+            group.held.append(group.right)
+        group.left = None
+        group.right = None
 
     # Refill BOTH slots from pending
     if group.pending:
@@ -419,13 +446,15 @@ def pk_advance(group_id: str, action: str):
     - 'right': challenger (right) wins, becomes new champion
     - 'both': keep both photos
     - 'none': reject both photos
+    - 'hold': hold both photos for later review
     - 'keep': (single mode) keep the photo
     - 'reject': (single mode) reject the photo
+    - 'hold': (single mode) hold the photo for later review
     """
     if not session_state:
         raise HTTPException(400, "No session")
 
-    if action not in ('left', 'right', 'both', 'none', 'keep', 'reject'):
+    if action not in ('left', 'right', 'both', 'none', 'hold', 'keep', 'reject'):
         raise HTTPException(400, f"Invalid action: {action}")
 
     target_group = None
@@ -1011,6 +1040,42 @@ def browse_directory(path: str = ""):
     return {"current": str(target), "parent": str(target.parent), "dirs": dirs}
 
 
+@app.get("/api/check_cache")
+def check_cache(folder_path: str):
+    """检查目录下是否有已存在的缓存和输出文件夹。"""
+    cache_dir_path = os.path.join(folder_path, ".photopicker_cache")
+    output_dir_path = os.path.join(folder_path, "入选")
+    losers_dir_path = os.path.join(folder_path, "未入选")
+
+    has_cache = os.path.exists(cache_dir_path)
+    has_output = os.path.exists(output_dir_path) or os.path.exists(losers_dir_path)
+
+    return {
+        "has_cache": has_cache or has_output,
+        "cache_dir": has_cache,
+        "output_dir": has_output,
+    }
+
+
+@app.post("/api/clear_cache")
+def clear_cache(folder_path: str):
+    """清除目录下的缓存和输出文件夹。"""
+    cache_dir_path = os.path.join(folder_path, ".photopicker_cache")
+    output_dir_path = os.path.join(folder_path, "入选")
+    losers_dir_path = os.path.join(folder_path, "未入选")
+
+    removed = []
+    for path in [cache_dir_path, output_dir_path, losers_dir_path]:
+        if os.path.exists(path):
+            if os.path.isdir(path):
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
+            removed.append(path)
+
+    return {"ok": True, "removed": removed}
+
+
 @app.get("/api/preferences")
 def get_preferences():
     if not pref_tracker:
@@ -1269,19 +1334,97 @@ def final_confirm():
 
 
 @app.post("/api/export/final")
-def export_final(mode: str = "copy"):
-    selected = [p.path for p in photos_db.values() if p.is_selected]
+def export_final(mode: str = "copy", group_by: str = "none"):
+    """导出照片。
+
+    Args:
+        mode: copy 或 move
+        group_by: none(默认) | person(按人物) | scene(按场景)
+    """
+    selected = [p for p in photos_db.values() if p.is_selected]
     rejected = [p.path for p in photos_db.values() if p.is_rejected]
+
     # Build raw_paths mapping for JPG->RAW pairing
     raw_paths = {}
     for p in photos_db.values():
         if p.raw_path:
             raw_paths[p.path] = p.raw_path
-    result = export_winners_losers(
-        folder=current_folder, winners=selected, losers=rejected, mode=mode,
-        raw_paths=raw_paths
-    )
-    return result
+
+    if group_by == "person":
+        # 按人物导出
+        photos_data = [
+            {
+                "id": p.id,
+                "path": p.path,
+                "face_group": p.face_group,
+                "person_name": getattr(p, 'person_name', None),
+            }
+            for p in selected
+        ]
+        result = export_by_person(
+            folder=current_folder,
+            photos=photos_data,
+            mode=mode,
+            raw_paths=raw_paths,
+        )
+        result["rejected"] = len(rejected)
+        return result
+    elif group_by == "scene":
+        # 按场景导出
+        photos_data = [
+            {
+                "id": p.id,
+                "path": p.path,
+                "scene_group": p.scene_group,
+            }
+            for p in selected
+        ]
+        result = export_by_group(
+            folder=current_folder,
+            photos=photos_data,
+            mode=mode,
+            raw_paths=raw_paths,
+        )
+        result["rejected"] = len(rejected)
+        return result
+    else:
+        # 默认：入选/未入选
+        result = export_winners_losers(
+            folder=current_folder,
+            winners=[p.path for p in selected],
+            losers=rejected,
+            mode=mode,
+            raw_paths=raw_paths,
+        )
+        return result
+
+
+@app.post("/api/persons/{person_id}/name")
+def name_person(person_id: str, name: str):
+    """给人物聚类命名。"""
+    for photo in photos_db.values():
+        if photo.face_group == person_id:
+            photo.person_name = name
+    return {"ok": True}
+
+
+@app.get("/api/persons")
+def get_persons():
+    """获取人物聚类列表。"""
+    persons = {}
+    for photo in photos_db.values():
+        if photo.face_group:
+            if photo.face_group not in persons:
+                persons[photo.face_group] = {
+                    "id": photo.face_group,
+                    "name": getattr(photo, 'person_name', None) or photo.face_group,
+                    "count": 0,
+                    "sample_photos": [],
+                }
+            persons[photo.face_group]["count"] += 1
+            if len(persons[photo.face_group]["sample_photos"]) < 3:
+                persons[photo.face_group]["sample_photos"].append(photo.id)
+    return list(persons.values())
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent

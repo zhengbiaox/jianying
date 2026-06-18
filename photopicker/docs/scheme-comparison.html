@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>拣影 - 分组方案展示</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, sans-serif; background: #1a1a2e; color: #eee; padding: 2rem; }
+  h1 { text-align: center; margin-bottom: 2rem; }
+  .schemes { display: flex; gap: 2rem; justify-content: center; flex-wrap: wrap; }
+  .scheme { background: #16213e; border-radius: 12px; padding: 1.5rem; width: 350px; }
+  .scheme h2 { font-size: 1.1rem; margin-bottom: 1rem; color: #4cc9f0; }
+  .scheme p { color: #aaa; font-size: 0.9rem; margin-bottom: 1rem; }
+  .mock { background: #0f3460; border-radius: 8px; padding: 1rem; min-height: 300px; }
+  .pk-area { display: flex; gap: 1rem; margin-bottom: 1rem; }
+  .photo-box { flex: 1; background: #1a1a2e; border-radius: 8px; height: 120px; display: flex; align-items: center; justify-content: center; color: #666; }
+  .photo-box.selected { border: 2px solid #4cc9f0; }
+  .photo-box.rejected { border: 2px solid #e63946; opacity: 0.5; }
+  .info-panel { background: #1a1a2e; border-radius: 8px; padding: 0.8rem; margin-bottom: 0.5rem; }
+  .info-panel h3 { font-size: 0.85rem; margin-bottom: 0.5rem; color: #4cc9f0; }
+  .info-row { display: flex; justify-content: space-between; font-size: 0.8rem; color: #aaa; margin-bottom: 0.3rem; }
+  .tag { background: #0f3460; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; }
+  .progress-bar { background: #1a1a2e; border-radius: 4px; height: 8px; margin-top: 0.5rem; }
+  .progress-fill { background: #4cc9f0; height: 100%; border-radius: 4px; }
+  .drawer { background: #1a1a2e; border-radius: 8px; padding: 0.8rem; margin-top: 0.5rem; }
+  .drawer-header { display: flex; justify-content: space-between; align-items: center; }
+  .drawer-content { margin-top: 0.5rem; }
+  .btn { background: #0f3460; border: none; color: #4cc9f0; padding: 0.3rem 0.6rem; border-radius: 4px; font-size: 0.75rem; cursor: pointer; }
+  .btn:hover { background: #1a1a2e; }
+  .pros { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #333; }
+  .pros li { font-size: 0.8rem; color: #aaa; margin-bottom: 0.3rem; }
+  .pros li.good { color: #4ade80; }
+  .pros li.bad { color: #f87171; }
+</style>
+</head>
+<body>
+  <h1>拣影 - 分组方案对比</h1>
+  <div class="schemes">
+    
+    <!-- 方案 1：信息面板 -->
+    <div class="scheme">
+      <h2>方案 1：信息面板（推荐）</h2>
+      <p>PK 页面左侧显示当前照片的分组信息，点击人物名可筛选</p>
+      <div class="mock">
+        <div style="display: flex; gap: 1rem;">
+          <div style="width: 100px;">
+            <div class="info-panel">
+              <h3>照片 A</h3>
+              <div class="info-row"><span>评分</span><span>85</span></div>
+              <div class="info-row"><span>场景</span><span class="tag">海边 (12张)</span></div>
+              <div class="info-row"><span>人物</span></div>
+              <div style="display: flex; gap: 0.3rem; flex-wrap: wrap;">
+                <span class="tag" style="cursor:pointer">张三</span>
+                <span class="tag" style="cursor:pointer">李四</span>
+              </div>
+            </div>
+          </div>
+          <div style="flex:1;">
+            <div class="pk-area">
+              <div class="photo-box selected">照片 A ✓</div>
+              <div class="photo-box rejected">照片 B ✗</div>
+            </div>
+            <div style="text-align:center; color:#666; font-size:0.8rem;">← 左选 | 右选 →</div>
+          </div>
+        </div>
+      </div>
+      <ul class="pros">
+        <li class="good">✓ 不打断 PK 流程</li>
+        <li class="good">✓ 提供额外信息</li>
+        <li class="bad">✗ 筛选后需重新进入 PK</li>
+      </ul>
+    </div>
+
+    <!-- 方案 2：底部进度条 -->
+    <div class="scheme">
+      <h2>方案 2：底部进度条</h2>
+      <p>PK 页面底部显示分组进度和人物统计</p>
+      <div class="mock">
+        <div class="pk-area">
+          <div class="photo-box selected">照片 A ✓</div>
+          <div class="photo-box rejected">照片 B ✗</div>
+        </div>
+        <div style="text-align:center; color:#666; font-size:0.8rem; margin-bottom:1rem;">← 左选 | 右选 →</div>
+        <div class="info-panel">
+          <h3>分组进度</h3>
+          <div class="info-row"><span>场景</span><span>海边 (3/10 组)</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:30%"></div></div>
+          <div class="info-row" style="margin-top:0.5rem;"><span>人物统计</span></div>
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            <span class="tag">张三 5张</span>
+            <span class="tag">李四 3张</span>
+            <span class="tag">王五 2张</span>
+          </div>
+        </div>
+      </div>
+      <ul class="pros">
+        <li class="good">✓ 有进度感</li>
+        <li class="good">✓ 不打断 PK</li>
+        <li class="bad">✗ 不能主动切换</li>
+      </ul>
+    </div>
+
+    <!-- 方案 3：抽屉面板 -->
+    <div class="scheme">
+      <h2>方案 3：抽屉面板</h2>
+      <p>PK 页面右侧抽屉，点击展开可切换分组视图</p>
+      <div class="mock">
+        <div class="pk-area">
+          <div class="photo-box selected">照片 A ✓</div>
+          <div class="photo-box rejected">照片 B ✗</div>
+        </div>
+        <div style="text-align:center; color:#666; font-size:0.8rem; margin-bottom:1rem;">← 左选 | 右选 →</div>
+        <div class="drawer">
+          <div class="drawer-header">
+            <span style="font-size:0.85rem;">分组信息 ▼</span>
+            <button class="btn">切换视图</button>
+          </div>
+          <div class="drawer-content">
+            <div class="info-row"><span>当前场景</span><span>海边</span></div>
+            <div class="info-row"><span>包含人物</span></div>
+            <div style="display: flex; gap: 0.3rem; flex-wrap: wrap;">
+              <span class="tag">张三</span>
+              <span class="tag">李四</span>
+              <span class="tag">王五</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <ul class="pros">
+        <li class="good">✓ 可以主动切换</li>
+        <li class="bad">✗ 切换后 PK 进度丢失</li>
+        <li class="bad">✗ 交互复杂</li>
+      </ul>
+    </div>
+
+  </div>
+
+  <div style="text-align:center; margin-top:2rem; color:#666;">
+    <p>建议：选片时用方案 1，确认导出时再提供分组切换</p>
+  </div>
+</body>
+</html>

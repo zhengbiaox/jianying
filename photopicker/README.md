@@ -1,5 +1,8 @@
 # 拣影 📸
 
+[![CI](https://github.com/zhengbiaox/jianying/actions/workflows/ci.yml/badge.svg)](https://github.com/zhengbiaox/jianying/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/)
+
 本地智能选片工具，帮你从海量照片中快速挑选最佳照片。
 
 ## ✨ 功能特性

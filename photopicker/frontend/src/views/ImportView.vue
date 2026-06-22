@@ -1,8 +1,12 @@
 <template>
   <div class="import-view">
+    <ProgressSteps :current="0" />
+
     <!-- Phase 1: Directory selection -->
-    <div v-if="phase === 'select'">
+    <div v-if="phase === 'select'" class="content">
       <h2>拣影</h2>
+      <p class="subtitle">选择照片文件夹，开始智能选片</p>
+
       <div class="browser">
         <div class="browser-path">
           <span class="path-label">当前路径:</span>
@@ -17,7 +21,7 @@
           <div v-if="dirs.length === 0" class="empty">此目录下没有子文件夹</div>
         </div>
         <div class="folder-preview" v-if="preview">
-          <p>        已识别 <strong>{{ preview.count }}</strong> 张照片，共 <strong>{{ preview.size_mb }} MB</strong></p>
+          <p>已识别 <strong>{{ preview.count }}</strong> 张照片，共 <strong>{{ preview.size_mb }} MB</strong></p>
         </div>
         <div v-if="existingCache && existingCache.has_cache" class="cache-warning">
           <p>⚠️ 检测到已有处理记录</p>
@@ -28,27 +32,34 @@
           <button class="clear-cache-btn" @click="clearCache">清除旧记录，重新开始</button>
         </div>
       </div>
+
       <div class="options">
         <div class="option-group">
-          <label>处理引擎:</label>
+          <label>筛选强度</label>
           <div class="radio-group">
-            <label><input type="radio" v-model="runtime" value="auto" /> 自动检测</label>
-            <label><input type="radio" v-model="runtime" value="cpu" /> CPU</label>
-            <label><input type="radio" v-model="runtime" value="gpu" /> GPU</label>
-          </div>
-        </div>
-        <div class="option-group">
-          <label>甄选策略:</label>
-          <div class="radio-group">
-            <label><input type="radio" v-model="filterLevel" value="80" /> 🟢 精选 · 严格</label>
-            <label><input type="radio" v-model="filterLevel" value="60" /> 🟡 均衡 · 推荐</label>
-            <label><input type="radio" v-model="filterLevel" value="40" /> 🔴 宽泛 · 保守</label>
+            <label class="option-card" :class="{ selected: filterLevel === '80' }">
+              <input type="radio" v-model="filterLevel" value="80" />
+              <span class="option-title">严格</span>
+              <span class="option-desc">仅筛掉明显技术性废片</span>
+            </label>
+            <label class="option-card" :class="{ selected: filterLevel === '60' }">
+              <input type="radio" v-model="filterLevel" value="60" />
+              <span class="option-title">均衡</span>
+              <span class="option-desc">推荐，平衡质量和数量</span>
+            </label>
+            <label class="option-card" :class="{ selected: filterLevel === '40' }">
+              <input type="radio" v-model="filterLevel" value="40" />
+              <span class="option-title">宽泛</span>
+              <span class="option-desc">保守筛选，保留更多照片</span>
+            </label>
           </div>
         </div>
       </div>
+
       <button class="start-btn" @click="startProcess" :disabled="!currentPath">
         开始分析
       </button>
+
       <div class="reset-section">
         <button class="reset-btn" @click="doReset">重新开始</button>
         <p class="reset-hint">清除所有缓存与进度</p>
@@ -56,7 +67,7 @@
     </div>
 
     <!-- Phase 2: Processing with photo wall -->
-    <div v-if="phase === 'processing'" class="processing">
+    <div v-if="phase === 'processing'" class="content processing">
       <div class="progress-header">
         <h3>{{ processStatus.status === 'grouping' ? '正在提取特征并分组...' : '正在逐帧分析...' }}</h3>
         <button class="stop-btn" @click="stopProcess">停止</button>
@@ -84,7 +95,7 @@
     </div>
 
     <!-- Phase 3: Done -->
-    <div v-if="phase === 'done'" class="done">
+    <div v-if="phase === 'done'" class="content done">
       <h3>✅ 分析完成</h3>
       <div class="done-stats">
         <p>共 <strong>{{ processStatus.total }}</strong> 张照片</p>
@@ -95,7 +106,7 @@
     </div>
 
     <!-- Phase 4: Stopped -->
-    <div v-if="phase === 'stopped'" class="done">
+    <div v-if="phase === 'stopped'" class="content done">
       <h3>⏹ 已停止</h3>
       <p>已处理 {{ processStatus.done }} 张，建议淘汰 {{ processStatus.rejected_count }} 张</p>
       <button class="next-btn" @click="$router.push('/prescreen')">开始筛选 →</button>
@@ -108,6 +119,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
+import ProgressSteps from '../components/ProgressSteps.vue'
 
 const router = useRouter()
 const phase = ref('select')
@@ -239,58 +251,63 @@ async function clearCache() {
 </script>
 
 <style scoped>
-.import-view { padding: 1.5rem 2rem; max-width: 800px; margin: 0 auto; }
-.import-view h2 { margin-bottom: 1.5rem; text-align: center; }
-.browser { background: #16213e; border-radius: 12px; padding: 1rem; margin-bottom: 1rem; }
+.import-view { min-height: 100vh; }
+.content { padding: 2rem; max-width: 800px; margin: 0 auto; }
+h2 { margin-bottom: 0.5rem; text-align: center; font-size: 2rem; }
+.subtitle { text-align: center; color: #888; margin-bottom: 2rem; }
+.browser { background: #16213e; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; }
 .browser-path { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; padding-bottom: 0.8rem; border-bottom: 1px solid #333; }
 .path-label { color: #888; font-size: 0.85rem; }
-.path-text { color: #eee; flex: 1; font-size: 0.9rem; word-break: break-all; }
-.up-btn, .native-btn { padding: 0.3rem 0.8rem; background: #333; color: #aaa; border: none; border-radius: 6px; cursor: pointer; }
+.path-text { color: #eee; flex: 1; font-size: 0.95rem; word-break: break-all; }
+.up-btn, .native-btn { padding: 0.4rem 1rem; background: #333; color: #aaa; border: none; border-radius: 6px; cursor: pointer; }
 .up-btn:disabled { opacity: 0.3; }
 .dir-list { max-height: 300px; overflow-y: auto; margin-bottom: 0.5rem; }
-.dir-item { padding: 0.5rem 0.8rem; cursor: pointer; border-radius: 6px; }
+.dir-item { padding: 0.6rem 1rem; cursor: pointer; border-radius: 6px; }
 .dir-item:hover { background: rgba(15,52,96,0.4); }
-.empty { color: #666; padding: 1rem; text-align: center; }
-.folder-preview { padding: 0.5rem; background: #0f3460; border-radius: 6px; text-align: center; }
+.empty { color: #666; padding: 1.5rem; text-align: center; }
+.folder-preview { padding: 1rem; background: #0f3460; border-radius: 6px; text-align: center; }
 .folder-preview strong { color: #4caf50; }
-.options { background: #16213e; border-radius: 12px; padding: 1rem; margin-bottom: 1rem; }
-.option-group { margin-bottom: 0.8rem; }
-.option-group > label { color: #aaa; font-size: 0.9rem; display: block; margin-bottom: 0.3rem; }
-.radio-group { display: flex; gap: 1rem; }
-.radio-group label { color: #eee; cursor: pointer; }
-.start-btn { width: 100%; padding: 1rem; background: #0f3460; color: #fff; border: none; border-radius: 12px; font-size: 1.2rem; cursor: pointer; }
-.start-btn:disabled { opacity: 0.5; }
-.processing { }
-.progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
-.stop-btn { padding: 0.5rem 1.5rem; background: #c0392b; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 1rem; }
-.stop-btn:hover { background: #e74c3c; }
-.progress-bar { height: 8px; background: #333; border-radius: 4px; overflow: hidden; margin-bottom: 0.5rem; }
-.progress-fill { height: 100%; background: linear-gradient(90deg, #0f3460, #4caf50); transition: width 0.3s; }
-.progress-info { display: flex; gap: 2rem; color: #888; font-size: 0.9rem; margin-bottom: 1rem; }
-.photo-wall { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 0.5rem; max-height: 60vh; overflow-y: auto; }
-.wall-cell { position: relative; border-radius: 6px; overflow: hidden; border: 2px solid transparent; animation: fadeIn 0.3s ease-out; }
-.wall-cell.ok { border-color: #4caf50; }
-.wall-cell.rejected { border-color: #c0392b; }
-.wall-cell.grouping { border-color: #3498db; }
-.wall-cell img { width: 100%; height: 80px; object-fit: cover; }
-.wall-overlay { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.7); padding: 2px 4px; display: flex; justify-content: space-between; align-items: center; }
-.wall-score { color: #fff; font-size: 0.7rem; }
-.wall-reason { color: #ff9800; font-size: 0.65rem; }
-.wall-grouping { color: #3498db; font-size: 0.65rem; }
-.grouping-tag { color: #3498db; font-weight: 600; }
-@keyframes fadeIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
-.done { text-align: center; padding: 3rem 0; }
-.done-stats { margin: 1rem 0; }
-.done-stats strong { color: #4caf50; }
-.next-btn { padding: 0.8rem 2rem; background: #0f3460; color: #fff; border: none; border-radius: 8px; font-size: 1.1rem; cursor: pointer; margin: 0.5rem; }
-.restart-btn { padding: 0.8rem 2rem; background: #333; color: #aaa; border: none; border-radius: 8px; font-size: 1rem; cursor: pointer; margin: 0.5rem; }
-.reset-section { margin-top: 2rem; text-align: center; padding: 1rem; border-top: 1px solid #333; }
-.reset-btn { padding: 0.5rem 1.5rem; background: #c0392b; color: #fff; border: none; border-radius: 8px; cursor: pointer; }
-.reset-btn:hover { background: #e74c3c; }
-.reset-hint { color: #666; font-size: 0.8rem; margin-top: 0.5rem; }
 .cache-warning { margin-top: 1rem; padding: 1rem; background: #7d6608; border-radius: 8px; }
 .cache-warning p { color: #fff; margin-bottom: 0.5rem; }
 .cache-detail { color: #ddd; font-size: 0.85rem; }
 .clear-cache-btn { padding: 0.5rem 1rem; background: #c0392b; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; }
-.clear-cache-btn:hover { background: #e74c3c; }
+.options { background: #16213e; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; }
+.option-group { margin-bottom: 1rem; }
+.option-group > label { color: #aaa; font-size: 0.95rem; display: block; margin-bottom: 0.8rem; }
+.radio-group { display: flex; gap: 1rem; }
+.option-card { flex: 1; padding: 1rem; background: #1a1a2e; border: 2px solid #333; border-radius: 8px; cursor: pointer; text-align: center; transition: all 0.2s; }
+.option-card:hover { border-color: #4cc9f0; }
+.option-card.selected { border-color: #4cc9f0; background: #0f3460; }
+.option-card input { display: none; }
+.option-title { display: block; font-size: 1.1rem; font-weight: 600; color: #fff; margin-bottom: 0.3rem; }
+.option-desc { display: block; font-size: 0.8rem; color: #888; }
+.start-btn { width: 100%; padding: 1.2rem; background: #0f3460; color: #fff; border: none; border-radius: 12px; font-size: 1.3rem; cursor: pointer; }
+.start-btn:disabled { opacity: 0.5; }
+.reset-section { margin-top: 2rem; text-align: center; padding: 1.5rem; border-top: 1px solid #333; }
+.reset-btn { padding: 0.6rem 1.5rem; background: #c0392b; color: #fff; border: none; border-radius: 8px; cursor: pointer; }
+.reset-btn:hover { background: #e74c3c; }
+.reset-hint { color: #666; font-size: 0.8rem; margin-top: 0.5rem; }
+.processing { }
+.progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+.stop-btn { padding: 0.6rem 1.5rem; background: #c0392b; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 1rem; }
+.stop-btn:hover { background: #e74c3c; }
+.progress-bar { height: 10px; background: #333; border-radius: 5px; overflow: hidden; margin-bottom: 0.5rem; }
+.progress-fill { height: 100%; background: linear-gradient(90deg, #0f3460, #4caf50); transition: width 0.3s; }
+.progress-info { display: flex; gap: 2rem; color: #888; font-size: 0.95rem; margin-bottom: 1rem; }
+.photo-wall { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.8rem; max-height: 60vh; overflow-y: auto; }
+.wall-cell { position: relative; border-radius: 8px; overflow: hidden; border: 2px solid transparent; animation: fadeIn 0.3s ease-out; }
+.wall-cell.ok { border-color: #4caf50; }
+.wall-cell.rejected { border-color: #c0392b; }
+.wall-cell.grouping { border-color: #3498db; }
+.wall-cell img { width: 100%; height: 100px; object-fit: cover; }
+.wall-overlay { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.7); padding: 4px 6px; display: flex; justify-content: space-between; align-items: center; }
+.wall-score { color: #fff; font-size: 0.8rem; }
+.wall-reason { color: #ff9800; font-size: 0.7rem; }
+.wall-grouping { color: #3498db; font-size: 0.7rem; }
+.grouping-tag { color: #3498db; font-weight: 600; }
+@keyframes fadeIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+.done { text-align: center; padding: 4rem 0; }
+.done-stats { margin: 1.5rem 0; }
+.done-stats strong { color: #4caf50; }
+.next-btn { padding: 1rem 2.5rem; background: #0f3460; color: #fff; border: none; border-radius: 8px; font-size: 1.2rem; cursor: pointer; margin: 0.5rem; }
 </style>

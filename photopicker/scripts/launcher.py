@@ -284,6 +284,59 @@ def ensure_venv(uv: str) -> None:
     info("✓ 虚拟环境已就绪")
 
 
+def test_mirror_speed(mirror_url: str, timeout: int = 3) -> float:
+    """测试镜像源速度，返回响应时间（秒），失败返回无穷大。"""
+    import urllib.request
+    import time
+    try:
+        # 只测试连接速度，不下载实际内容
+        test_url = mirror_url.rstrip('/') + '/pip/'
+        start = time.time()
+        req = urllib.request.Request(test_url, method='HEAD')
+        urllib.request.urlopen(req, timeout=timeout)
+        return time.time() - start
+    except Exception:
+        return float('inf')
+
+
+def select_fastest_mirror() -> tuple[str, str]:
+    """测试所有镜像源速度，返回最快的源。"""
+    # 检查缓存
+    cache_file = ROOT / ".mirror_cache"
+    if cache_file.exists():
+        try:
+            cached = cache_file.read_text().strip().split('|')
+            if len(cached) == 2:
+                info(f"使用缓存的镜像源: {cached[1]}")
+                return cached[0], cached[1]
+        except Exception:
+            pass
+
+    info("正在测试镜像源速度...")
+    fastest_url = None
+    fastest_name = None
+    fastest_time = float('inf')
+
+    for mirror_url, mirror_name in PYPI_MIRRORS:
+        speed = test_mirror_speed(mirror_url)
+        if speed < fastest_time:
+            fastest_time = speed
+            fastest_url = mirror_url
+            fastest_name = mirror_name
+
+    if fastest_url:
+        info(f"最快的镜像源: {fastest_name} ({fastest_time:.2f}s)")
+        # 缓存结果
+        try:
+            cache_file.write_text(f"{fastest_url}|{fastest_name}")
+        except Exception:
+            pass
+        return fastest_url, fastest_name
+    
+    die("所有镜像源都无法连接，请检查网络后重试")
+    return "", ""
+
+
 def pip_install(
     uv: str,
     packages: list[str],
@@ -301,23 +354,9 @@ def pip_install(
     if index_url:
         cmd += ["--index-url", index_url]
     else:
-        # 尝试多个镜像源
-        for mirror_url, mirror_name in PYPI_MIRRORS:
-            info(f"尝试源: {mirror_name}")
-            try:
-                subprocess.check_call(
-                    cmd + ["--index-url", mirror_url, "--extra-index-url", "https://pypi.org/simple/"] + packages,
-                    stdout=subprocess.DEVNULL if not sys.stdout.isatty() else None,
-                )
-                info(f"✓ 使用镜像源安装成功: {mirror_name}")
-                return
-            except subprocess.CalledProcessError:
-                warn(f"镜像源 {mirror_name} 速度较慢或连接失败，尝试下一个...")
-                continue
-
-        # 所有镜像源都失败，使用默认源
-        warn("所有镜像源都较慢，使用默认源安装...")
-        cmd += ["--extra-index-url", "https://pypi.org/simple/"]
+        # 测试速度并选择最快的镜像源
+        mirror_url, mirror_name = select_fastest_mirror()
+        cmd += ["--index-url", mirror_url]
 
     info("接下来会看到 pip 滚动下载进度条——只要在动就是在装，不要关窗口。")
     subprocess.check_call(cmd + packages)

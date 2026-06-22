@@ -1,6 +1,8 @@
 <template>
   <div class="confirm-view">
-    <h2>确认 · 导出</h2>
+    <ProgressSteps :current="3" />
+    <div class="content">
+    <h2>确认导出</h2>
 
     <!-- PK not complete -->
     <div v-if="!pkComplete" class="not-ready">
@@ -108,6 +110,7 @@
         </template>
       </div>
     </div>
+    </div>
   </div>
 </template>
 
@@ -115,6 +118,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
+import ProgressSteps from '../components/ProgressSteps.vue'
 
 const router = useRouter()
 const allPhotos = ref([])
@@ -211,46 +215,46 @@ onMounted(() => {
 
 <style scoped>
 .confirm-view { padding: 1.5rem 2rem; }
-.confirm-view h2 { margin-bottom: 0.5rem; text-align: center; }
-.not-ready { text-align: center; padding: 4rem 0; }
-.not-ready-msg { font-size: 1.3rem; color: #ff9800; margin-bottom: 1rem; }
-.not-ready-info { color: #888; margin-bottom: 0.5rem; }
-.go-pick-btn { margin-top: 1.5rem; padding: 0.8rem 2rem; background: #0f3460; color: #fff; border: none; border-radius: 8px; font-size: 1.1rem; cursor: pointer; }
-.confirm-stats { display: flex; gap: 2rem; justify-content: center; margin-bottom: 1.5rem; }
+.confirm-view h2 { margin-bottom: 1rem; text-align: center; }
+.not-ready { text-align: center; padding: 5rem 0; }
+.not-ready-msg { font-size: 1.5rem; color: #ff9800; margin-bottom: 1rem; }
+.not-ready-info { color: #888; margin-bottom: 0.5rem; font-size: 1.1rem; }
+.go-pick-btn { margin-top: 2rem; padding: 1rem 2.5rem; background: #0f3460; color: #fff; border: none; border-radius: 8px; font-size: 1.2rem; cursor: pointer; }
+.confirm-stats { display: flex; gap: 3rem; justify-content: center; margin-bottom: 2rem; font-size: 1.1rem; }
 .confirm-stats strong { color: #4caf50; }
-.section { margin-bottom: 1.5rem; }
-.section h3 { color: #aaa; font-size: 1rem; margin-bottom: 0.5rem; }
-.section-hint { color: #666; font-size: 0.8rem; margin-bottom: 0.8rem; }
-.persons-section { background: #16213e; padding: 1rem; border-radius: 12px; }
-.persons-list { display: flex; flex-direction: column; gap: 0.8rem; }
-.person-row { display: flex; align-items: center; gap: 0.8rem; }
-.person-photos { display: flex; gap: 4px; }
-.person-thumb { width: 40px; height: 40px; border-radius: 6px; object-fit: cover; border: 2px solid #4cc9f0; }
-.person-name-input { flex: 1; padding: 0.4rem 0.6rem; background: #1a1a2e; border: 1px solid #333; border-radius: 6px; color: #fff; font-size: 0.9rem; }
+.section { margin-bottom: 2rem; }
+.section h3 { color: #aaa; font-size: 1.1rem; margin-bottom: 0.8rem; }
+.section-hint { color: #666; font-size: 0.85rem; margin-bottom: 1rem; }
+.persons-section { background: #16213e; padding: 1.5rem; border-radius: 12px; }
+.persons-list { display: flex; flex-direction: column; gap: 1rem; }
+.person-row { display: flex; align-items: center; gap: 1rem; }
+.person-photos { display: flex; gap: 6px; }
+.person-thumb { width: 50px; height: 50px; border-radius: 8px; object-fit: cover; border: 2px solid #4cc9f0; }
+.person-name-input { flex: 1; padding: 0.6rem 0.8rem; background: #1a1a2e; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 1rem; }
 .person-name-input:focus { outline: none; border-color: #4cc9f0; }
-.person-count { color: #888; font-size: 0.8rem; width: 50px; text-align: right; }
-.photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 0.6rem; max-height: 40vh; overflow-y: auto; }
-.photo-card { position: relative; border-radius: 8px; overflow: hidden; }
+.person-count { color: #888; font-size: 0.9rem; width: 60px; text-align: right; }
+.photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.8rem; max-height: 50vh; overflow-y: auto; }
+.photo-card { position: relative; border-radius: 10px; overflow: hidden; }
 .photo-card.selected { border: 2px solid #4caf50; }
 .photo-card.held { border: 2px solid #f39c12; }
-.photo-card img { width: 100%; height: 80px; object-fit: cover; }
-.card-score { position: absolute; top: 4px; right: 4px; background: rgba(0,0,0,0.7); color: #4caf50; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; }
-.card-actions { position: absolute; bottom: 4px; left: 4px; display: flex; gap: 4px; }
-.mini-btn { padding: 2px 6px; border: none; border-radius: 4px; font-size: 0.65rem; cursor: pointer; }
+.photo-card img { width: 100%; height: 120px; object-fit: cover; }
+.card-score { position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,0.7); color: #4caf50; padding: 3px 8px; border-radius: 4px; font-size: 0.8rem; }
+.card-actions { position: absolute; bottom: 6px; left: 6px; display: flex; gap: 6px; }
+.mini-btn { padding: 4px 8px; border: none; border-radius: 4px; font-size: 0.75rem; cursor: pointer; }
 .mini-btn.accept { background: #4caf50; color: #fff; }
 .mini-btn.reject { background: #e74c3c; color: #fff; }
-.held-section { background: #16213e; padding: 1rem; border-radius: 12px; }
-.held-actions { display: flex; gap: 0.5rem; margin-bottom: 0.8rem; }
-.action-btn { padding: 0.4rem 0.8rem; border: none; border-radius: 6px; font-size: 0.8rem; cursor: pointer; }
+.held-section { background: #16213e; padding: 1.5rem; border-radius: 12px; }
+.held-actions { display: flex; gap: 0.8rem; margin-bottom: 1rem; }
+.action-btn { padding: 0.5rem 1rem; border: none; border-radius: 6px; font-size: 0.9rem; cursor: pointer; }
 .action-btn.accept { background: #4caf50; color: #fff; }
 .action-btn.reject { background: #e74c3c; color: #fff; }
-.confirm-actions { text-align: center; }
-.mode-select, .group-select { display: flex; gap: 1rem; align-items: center; justify-content: center; margin-bottom: 1rem; }
-.mode-select label, .group-select label { color: #aaa; cursor: pointer; }
-.export-btn { padding: 0.8rem 2rem; background: #0f3460; color: #fff; border: none; border-radius: 8px; font-size: 1.1rem; cursor: pointer; }
+.confirm-actions { text-align: center; margin-top: 2rem; }
+.mode-select, .group-select { display: flex; gap: 1.5rem; align-items: center; justify-content: center; margin-bottom: 1.2rem; }
+.mode-select label, .group-select label { color: #aaa; cursor: pointer; font-size: 1rem; }
+.export-btn { padding: 1rem 2.5rem; background: #0f3460; color: #fff; border: none; border-radius: 8px; font-size: 1.2rem; cursor: pointer; }
 .export-btn:disabled { opacity: 0.5; }
-.export-result { text-align: center; margin-top: 1.5rem; background: #16213e; padding: 1.5rem; border-radius: 12px; }
-.folder-info { display: flex; justify-content: space-between; padding: 0.3rem 0; border-bottom: 1px solid #333; }
+.export-result { text-align: center; margin-top: 2rem; background: #16213e; padding: 2rem; border-radius: 12px; }
+.folder-info { display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid #333; font-size: 1rem; }
 .folder-name { color: #aaa; }
 .folder-count { color: #4caf50; }
 </style>

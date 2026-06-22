@@ -33,25 +33,46 @@ if not defined UV (
 
 if not defined UV (
   echo.
-  echo [first-run setup] Downloading uv ^(Python toolchain, ~30MB^)...
+  echo [first-run setup] Installing uv ^(Python toolchain manager^)...
   echo   This step only happens once.
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"
-  if errorlevel 1 (
-    echo.
-    echo [ERROR] uv install failed.
-    echo         Common cause: astral.sh CDN is overseas, network unstable.
-    echo         Retry later, or manually run in PowerShell:
-    echo           irm https://astral.sh/uv/install.ps1 ^| iex
-    echo.
-    pause
-    exit /b 1
+  
+  REM Try pip install first (test mirror speed)
+  set "BEST_MIRROR=https://mirrors.aliyun.com/pypi/simple/"
+  where python >nul 2>&1 && (
+    python -m pip install uv -i !BEST_MIRROR! --trusted-host mirrors.aliyun.com --trusted-host pypi.tuna.tsinghua.edu.cn --trusted-host pypi.mirrors.ustc.edu.cn 2>nul
   )
-  REM re-probe after install
+  where python3 >nul 2>&1 && (
+    python3 -m pip install uv -i !BEST_MIRROR! --trusted-host mirrors.aliyun.com --trusted-host pypi.tuna.tsinghua.edu.cn --trusted-host pypi.mirrors.ustc.edu.cn 2>nul
+  )
+  
+  REM Re-probe after pip install
   if exist "%USERPROFILE%\.local\bin\uv.exe" set "UV=%USERPROFILE%\.local\bin\uv.exe"
   if not defined UV (
     if exist "%USERPROFILE%\.cargo\bin\uv.exe" set "UV=%USERPROFILE%\.cargo\bin\uv.exe"
   )
-  echo   [OK] uv installed
+  
+  REM If pip install failed, try curl
+  if not defined UV (
+    echo   Trying alternative install method...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"
+    if exist "%USERPROFILE%\.local\bin\uv.exe" set "UV=%USERPROFILE%\.local\bin\uv.exe"
+    if not defined UV (
+      if exist "%USERPROFILE%\.cargo\bin\uv.exe" set "UV=%USERPROFILE%\.cargo\bin\uv.exe"
+    )
+  )
+  
+  if defined UV (
+    echo   [OK] uv installed
+  ) else (
+    echo.
+    echo [ERROR] uv install failed.
+    echo         Please install uv manually:
+    echo           pip install uv
+    echo         Or visit: https://docs.astral.sh/uv/getting-started/installation/
+    echo.
+    pause
+    exit /b 1
+  )
 )
 
 if not defined UV (

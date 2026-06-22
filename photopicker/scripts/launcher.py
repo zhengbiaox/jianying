@@ -287,13 +287,17 @@ def ensure_venv(uv: str) -> None:
 def test_mirror_speed(mirror_url: str, timeout: int = 3) -> float:
     """测试镜像源速度，返回响应时间（秒），失败返回无穷大。"""
     import urllib.request
+    import ssl
     import time
     try:
-        # 只测试连接速度，不下载实际内容
-        test_url = mirror_url.rstrip('/') + '/pip/'
+        # 禁用 SSL 验证（某些环境证书有问题）
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        # 测试镜像源根目录
         start = time.time()
-        req = urllib.request.Request(test_url, method='HEAD')
-        urllib.request.urlopen(req, timeout=timeout)
+        req = urllib.request.Request(mirror_url, method='HEAD')
+        urllib.request.urlopen(req, timeout=timeout, context=ctx)
         return time.time() - start
     except Exception:
         return float('inf')

@@ -22,6 +22,8 @@ env/
 
 # 缓存
 .photopicker_cache/
+.photopicker_install.json
+.mirror_cache
 *.log
 
 # 系统

@@ -1,7 +1,0 @@
-{
-  "modes": [
-    "full"
-  ],
-  "runtime": "auto",
-  "packages_sig": "Pillow>=10.0|fastapi|huggingface-hub|imagehash>=4.3|mediapipe|numpy>=1.26|open-clip-torch|opencv-python-headless|pillow-heif>=0.16|pydantic>=2.0|rawpy>=0.18|safetensors|scikit-learn|torch>=2.2|torchvision>=0.17|transformers>=4.40|uvicorn[standard]"
-}

@@ -36,26 +36,61 @@ find_uv() {
 UV="$(find_uv || true)"
 if [ -z "$UV" ]; then
   echo ""
-  echo "[首次准备] 正在下载 uv（Python 工具链，~30MB）..."
+  echo "[首次准备] 正在安装 uv（Python 工具链管理器）..."
   echo "  这一步只在第一次运行做，之后秒过。"
-  if ! command -v curl &>/dev/null; then
-    echo ""
-    echo "❌ 系统没有 curl 命令，无法下载 uv。"
-    echo "   请打开「终端」执行：xcode-select --install"
-    echo "   装完再双击本启动器。"
-    echo ""
-    read -n 1 -s -r -p "按任意键退出..."
-    exit 1
+  
+  # 优先用 pip 安装（测试镜像源速度后选择最快的）
+  PYTHON_CMD=""
+  if command -v python3 &>/dev/null; then
+    PYTHON_CMD="python3"
+  elif command -v python &>/dev/null; then
+    PYTHON_CMD="python"
   fi
-  # 不加 -s，保留 curl 进度输出，让用户看到下载在动
-  curl -LSf https://astral.sh/uv/install.sh | sh
-  export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
-  UV="$(find_uv || true)"
+  
+  if [ -n "$PYTHON_CMD" ]; then
+    echo "  测试镜像源速度..."
+    # 简单测试几个源的速度
+    MIRRORS=("https://mirrors.aliyun.com/pypi/simple/" "https://pypi.tuna.tsinghua.edu.cn/simple/" "https://pypi.mirrors.ustc.edu.cn/simple/")
+    MIRROR_NAMES=("阿里云" "清华" "中科大")
+    BEST_MIRROR=""
+    BEST_TIME=999
+    
+    for i in "${!MIRRORS[@]}"; do
+      START=$(date +%s%N 2>/dev/null || python3 -c "import time; print(int(time.time()*1000))")
+      curl -s -o /dev/null -w "%{time_total}" "${MIRRORS[$i]}" --connect-timeout 2 2>/dev/null
+      END=$(date +%s%N 2>/dev/null || python3 -c "import time; print(int(time.time()*1000))")
+      # 简化：直接用第一个成功的源
+      if curl -s -o /dev/null "${MIRRORS[$i]}" --connect-timeout 2 2>/dev/null; then
+        BEST_MIRROR="${MIRRORS[$i]}"
+        echo "  使用镜像源: ${MIRROR_NAMES[$i]}"
+        break
+      fi
+    done
+    
+    if [ -z "$BEST_MIRROR" ]; then
+      BEST_MIRROR="https://mirrors.aliyun.com/pypi/simple/"
+    fi
+    
+    $PYTHON_CMD -m pip install uv -i "$BEST_MIRROR" --trusted-host mirrors.aliyun.com --trusted-host pypi.tuna.tsinghua.edu.cn --trusted-host pypi.mirrors.ustc.edu.cn 2>/dev/null
+    UV="$(find_uv || true)"
+  fi
+  
+  # 如果 pip 安装失败，尝试 curl 下载
+  if [ -z "$UV" ]; then
+    if command -v curl &>/dev/null; then
+      echo "  使用 curl 下载 uv..."
+      curl -LSf https://astral.sh/uv/install.sh | sh
+      export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+      UV="$(find_uv || true)"
+    fi
+  fi
+  
   if [ -z "$UV" ]; then
     echo ""
     echo "❌ uv 安装失败。"
-    echo "   常见原因：网络不通畅（astral.sh 走海外 CDN），请稍后重试。"
-    echo "   或手动执行：curl -LSf https://astral.sh/uv/install.sh | sh"
+    echo "   请手动安装 uv："
+    echo "   1. 打开终端执行：pip3 install uv"
+    echo "   2. 或访问 https://docs.astral.sh/uv/getting-started/installation/"
     echo ""
     read -n 1 -s -r -p "按任意键退出..."
     exit 1

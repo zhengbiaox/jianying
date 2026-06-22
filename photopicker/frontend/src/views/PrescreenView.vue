@@ -1,7 +1,9 @@
 <template>
   <div class="prescreen-view">
-    <h2>筛选 · 建议淘汰</h2>
-    <p class="summary">以下照片质量欠佳，可捞回保留</p>
+    <ProgressSteps :current="1" />
+    <div class="content">
+      <h2>技术筛选</h2>
+      <p class="summary">以下照片存在技术问题，可捞回保留</p>
 
     <div class="prescreen-stats">
       <span>建议淘汰: {{ rejectedPhotos.length }} 张</span>
@@ -39,6 +41,7 @@
       <img :src="'/api/preview/' + previewId" class="preview-img" />
       <button class="preview-close" @click="previewVisible = false">关闭</button>
     </div>
+    </div>
   </div>
 </template>
 
@@ -46,6 +49,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
+import ProgressSteps from '../components/ProgressSteps.vue'
 
 const router = useRouter()
 const photos = ref([])
@@ -98,22 +102,22 @@ onMounted(loadPhotos)
 <style scoped>
 .prescreen-view { padding: 1.5rem 2rem; }
 .prescreen-view h2 { margin-bottom: 0.5rem; }
-.summary { color: #aaa; margin-bottom: 1rem; }
-.prescreen-stats { display: flex; gap: 2rem; margin-bottom: 1rem; color: #888; }
-.prescreen-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 1rem; max-height: 60vh; overflow-y: auto; }
-.prescreen-card { background: #16213e; border-radius: 8px; overflow: hidden; border: 2px solid #c0392b; position: relative; cursor: pointer; }
+.summary { color: #aaa; margin-bottom: 1rem; font-size: 1.05rem; }
+.prescreen-stats { display: flex; gap: 2.5rem; margin-bottom: 1.5rem; color: #888; font-size: 1.05rem; }
+.prescreen-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1.2rem; max-height: 65vh; overflow-y: auto; }
+.prescreen-card { background: #16213e; border-radius: 10px; overflow: hidden; border: 2px solid #c0392b; position: relative; cursor: pointer; }
 .prescreen-card.rescued { border-color: #4caf50; }
-.prescreen-card img { width: 100%; height: 120px; object-fit: cover; }
-.card-info { padding: 0.5rem; }
-.score { background: #c0392b; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; }
-.reasons { margin-top: 0.3rem; display: flex; gap: 0.3rem; flex-wrap: wrap; }
-.reason-tag { background: #333; color: #ff9800; padding: 1px 6px; border-radius: 3px; font-size: 0.75rem; }
-.rescue-btn, .undo-btn { position: absolute; bottom: 0.5rem; right: 0.5rem; padding: 0.3rem 0.8rem; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem; }
+.prescreen-card img { width: 100%; height: 150px; object-fit: cover; }
+.card-info { padding: 0.8rem; }
+.score { background: #c0392b; color: #fff; padding: 3px 10px; border-radius: 4px; font-size: 0.9rem; }
+.reasons { margin-top: 0.4rem; display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.reason-tag { background: #333; color: #ff9800; padding: 2px 8px; border-radius: 3px; font-size: 0.8rem; }
+.rescue-btn, .undo-btn { position: absolute; bottom: 0.8rem; right: 0.8rem; padding: 0.4rem 1rem; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; }
 .rescue-btn { background: #4caf50; color: #fff; }
 .undo-btn { background: #666; color: #aaa; }
-.prescreen-actions { text-align: center; margin-top: 1.5rem; }
-.confirm-btn { padding: 0.8rem 2rem; background: #0f3460; color: #fff; border: none; border-radius: 8px; font-size: 1.1rem; cursor: pointer; }
+.prescreen-actions { text-align: center; margin-top: 2rem; }
+.confirm-btn { padding: 1rem 2.5rem; background: #0f3460; color: #fff; border: none; border-radius: 8px; font-size: 1.2rem; cursor: pointer; }
 .preview-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 1000; display: flex; align-items: center; justify-content: center; flex-direction: column; }
 .preview-img { max-width: 90vw; max-height: 85vh; object-fit: contain; border-radius: 8px; }
-.preview-close { margin-top: 1rem; padding: 0.5rem 2rem; background: #333; color: #aaa; border: none; border-radius: 8px; cursor: pointer; }
+.preview-close { margin-top: 1.5rem; padding: 0.6rem 2rem; background: #333; color: #aaa; border: none; border-radius: 8px; cursor: pointer; }
 </style>

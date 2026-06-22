@@ -1,5 +1,6 @@
 <template>
   <div class="pick-view">
+    <ProgressSteps :current="2" />
     <!-- Arena mode: processing groups -->
     <div v-if="!allDone" class="pick-area">
       <div class="pick-header">
@@ -92,6 +93,7 @@ import { useRouter } from 'vue-router'
 import axios from 'axios'
 import PKBattle from '../components/PKBattle.vue'
 import ZoomViewer from '../components/ZoomViewer.vue'
+import ProgressSteps from '../components/ProgressSteps.vue'
 
 const router = useRouter()
 

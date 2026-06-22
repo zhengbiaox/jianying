@@ -401,6 +401,10 @@ def ensure_dependencies(uv: str, modes: list[str], install: dict, force: bool) -
 
     pip_install(uv, packages)
 
+    # 把项目本身以 editable 模式装进 venv，让 uvicorn 能 import photopicker.backend
+    info("注册项目包（photopicker）...")
+    subprocess.check_call([uv, "pip", "install", "--python", str(PY_IN_VENV), "-e", str(ROOT)])
+
     install["packages_sig"] = sig
     install["modes"] = modes
     save_install(install)
@@ -420,21 +424,31 @@ def build_frontend():
 
     # 检查是否有 Node.js
     if not shutil.which("node"):
-        warn("未找到 Node.js，跳过前端构建")
-        warn("请手动构建前端：cd frontend && npm install && npm run build")
-        return
+        print()
+        print("❌ 未找到 Node.js，无法构建前端页面。")
+        print()
+        print("  请先安装 Node.js（推荐 v18 或更新版本）：")
+        print("    macOS:   brew install node")
+        print("    Windows: 访问 https://nodejs.org 下载安装")
+        print()
+        print("  安装完成后重新双击启动脚本即可。")
+        print()
+        try:
+            input("按回车键退出...")
+        except EOFError:
+            pass
+        sys.exit(1)
 
     info("正在构建前端...")
     try:
         # 检查是否需要安装 npm 依赖
         node_modules = frontend_dir / "node_modules"
         if not node_modules.exists():
-            info("安装前端依赖...")
+            info("安装前端依赖（首次约 1 分钟）...")
             subprocess.run(
                 ["npm", "install"],
                 cwd=str(frontend_dir),
                 check=True,
-                capture_output=True,
             )
 
         # 构建前端
@@ -442,12 +456,22 @@ def build_frontend():
             ["npm", "run", "build"],
             cwd=str(frontend_dir),
             check=True,
-            capture_output=True,
         )
         info("✓ 前端构建完成")
     except subprocess.CalledProcessError as e:
-        warn(f"前端构建失败: {e}")
-        warn("请手动构建前端：cd frontend && npm install && npm run build")
+        print()
+        print(f"❌ 前端构建失败：{e}")
+        print()
+        print("  请手动构建前端：")
+        print("    cd frontend")
+        print("    npm install")
+        print("    npm run build")
+        print()
+        try:
+            input("按回车键退出...")
+        except EOFError:
+            pass
+        sys.exit(1)
 
 
 # ---------- 启动 app ----------

@@ -25,20 +25,24 @@ jobs:
         run: |
           pip install --upgrade pip setuptools
           pip install \
-            fastapi \
-            "uvicorn[standard]" \
+            "fastapi>=0.100" \
+            "uvicorn[standard]>=0.20" \
             "pydantic>=2.0" \
-            opencv-python-headless \
+            "opencv-python-headless>=4.8" \
             "Pillow>=10.0" \
-            "pillow-heif>=0.16" \
+            "pillow-heif>=0.13" \
             "numpy>=1.26" \
             "imagehash>=4.3" \
             "rawpy>=0.18" \
-            mediapipe \
-            pytest
+            "mediapipe>=0.10" \
+            "pytest>=8.0"
 
       - name: Install project (editable)
-        run: pip install -e ./photopicker
+        working-directory: photopicker
+        run: pip install -e .
 
       - name: Run tests
+        working-directory: photopicker
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: pytest -v

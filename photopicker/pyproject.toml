@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=81.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "photopicker"
+version = "1.4.0"
+description = "拣影 — 本地智能选片工具，帮你从海量照片中快速挑选最佳照片"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "zhengbiaox"}
+]
+keywords = ["photo", "picker", "image-selection", "photography", "选片", "拣影"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Graphics",
+]
+
+[project.scripts]
+photopicker = "scripts.launcher:main"
+
+[project.optional-dependencies]
+# 核心依赖（纯算法模式可用）
+core = [
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic>=2.0",
+    "opencv-python-headless",
+    "Pillow>=10.0",
+    "pillow-heif>=0.16",
+    "numpy>=1.26",
+    "imagehash>=4.3",
+    "rawpy>=0.18",
+    "mediapipe",
+]
+# AI 增强模式额外依赖
+ai = [
+    "torch>=2.2",
+    "torchvision>=0.17",
+    "open-clip-torch",
+    "transformers>=4.40",
+    "huggingface-hub",
+    "safetensors",
+    "scikit-learn",
+    "insightface>=0.7",
+    "onnxruntime>=1.16",
+]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-v"

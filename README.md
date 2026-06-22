@@ -1,5 +1,7 @@
 # 拣影 📸
 
+> 📖 完整文档请查看 [photopicker/README.md](photopicker/README.md)
+
 本地智能选片工具，帮你从海量照片中快速挑选最佳照片。
 
 ## ✨ 功能特性

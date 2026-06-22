@@ -60,11 +60,26 @@ def test_compute_hashes_deterministic(tmp_imgs):
     assert a == b
 
 
-def test_compute_hashes_different_images(tmp_imgs):
-    h0 = compute_hashes(tmp_imgs[0])
-    h2 = compute_hashes(tmp_imgs[2])
-    # At least one hash should differ for very different colours
-    assert h0 != h2
+def test_compute_hashes_different_images(tmp_path):
+    # 纯色图的感知哈希相同（算法正常行为），需要用有纹理差异的图来测试
+    # 图0：棋盘格（高频纹理）
+    board = np.zeros((64, 64, 3), dtype=np.uint8)
+    for r in range(64):
+        for c in range(64):
+            if (r // 8 + c // 8) % 2 == 0:
+                board[r, c] = 255
+    p0 = str(tmp_path / "board.jpg")
+    cv2.imwrite(p0, board)
+
+    # 图1：水平渐变（低频，与棋盘格结构差异大）
+    gradient = np.tile(np.linspace(0, 255, 64, dtype=np.uint8), (64, 1))
+    gradient = cv2.cvtColor(gradient, cv2.COLOR_GRAY2BGR)
+    p1 = str(tmp_path / "gradient.jpg")
+    cv2.imwrite(p1, gradient)
+
+    h0 = compute_hashes(p0)
+    h1 = compute_hashes(p1)
+    assert h0 != h1, "棋盘格与渐变图的感知哈希应当不同"
 
 
 def test_compute_hashes_bad_path():

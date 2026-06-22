@@ -407,6 +407,49 @@ def ensure_dependencies(uv: str, modes: list[str], install: dict, force: bool) -
     info("✓ 依赖安装完成")
 
 
+def build_frontend():
+    """构建前端。"""
+    frontend_dir = ROOT / "frontend"
+    dist_dir = frontend_dir / "dist"
+    index_file = dist_dir / "index.html"
+
+    # 如果已经构建过，跳过
+    if index_file.exists():
+        info("✓ 前端已构建")
+        return
+
+    # 检查是否有 Node.js
+    if not shutil.which("node"):
+        warn("未找到 Node.js，跳过前端构建")
+        warn("请手动构建前端：cd frontend && npm install && npm run build")
+        return
+
+    info("正在构建前端...")
+    try:
+        # 检查是否需要安装 npm 依赖
+        node_modules = frontend_dir / "node_modules"
+        if not node_modules.exists():
+            info("安装前端依赖...")
+            subprocess.run(
+                ["npm", "install"],
+                cwd=str(frontend_dir),
+                check=True,
+                capture_output=True,
+            )
+
+        # 构建前端
+        subprocess.run(
+            ["npm", "run", "build"],
+            cwd=str(frontend_dir),
+            check=True,
+            capture_output=True,
+        )
+        info("✓ 前端构建完成")
+    except subprocess.CalledProcessError as e:
+        warn(f"前端构建失败: {e}")
+        warn("请手动构建前端：cd frontend && npm install && npm run build")
+
+
 # ---------- 启动 app ----------
 
 def check_port(port: int) -> bool:
@@ -560,13 +603,17 @@ def main() -> int:
     save_install(install)
 
     # 步骤 2：uv + venv + 依赖
-    step(2, 3, "准备 Python 环境与依赖")
+    step(2, 4, "准备 Python 环境与依赖")
     uv = ensure_uv()
     ensure_venv(uv)
     ensure_dependencies(uv, modes, install, force=False)
 
-    # 步骤 3：启动
-    step(3, 3, "启动应用")
+    # 步骤 3：构建前端
+    step(3, 4, "构建前端")
+    build_frontend()
+
+    # 步骤 4：启动
+    step(4, 4, "启动应用")
     port = int(os.environ.get("PHOTOPICKER_PORT", "8010"))
     rc = run_app(port, runtime)
 

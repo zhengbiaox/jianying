@@ -561,6 +561,13 @@ def run_app(port: int, runtime: str) -> int:
     print("=" * 56)
     print("  服务启动后浏览器会自动打开。")
     print("  ⚠ 关闭本窗口 = 停止服务。挑完片再关。")
+    print()
+    print("  首次启动会加载 AI 模型（约 1-3 分钟）：")
+    print("    • CLIP 语义模型（~350MB）")
+    print("    • DINOv2 视觉模型（~350MB）")
+    print("    • InsightFace 人脸模型（~300MB）")
+    print()
+    print("  看到 'Application startup complete' 后即可访问页面。")
     print("=" * 56)
     print()
 

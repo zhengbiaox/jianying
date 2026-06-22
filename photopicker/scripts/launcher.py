@@ -403,7 +403,7 @@ def ensure_dependencies(uv: str, modes: list[str], install: dict, force: bool) -
 
     # 把项目本身以 editable 模式装进 venv，让 uvicorn 能 import photopicker.backend
     info("注册项目包（photopicker）...")
-    subprocess.check_call([uv, "pip", "install", "--python", str(PY_IN_VENV), "-e", str(ROOT)])
+    subprocess.check_call([uv, "pip", "install", "--python", str(PY_IN_VENV), "--no-deps", "-e", str(ROOT)])
 
     install["packages_sig"] = sig
     install["modes"] = modes

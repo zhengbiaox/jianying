@@ -775,19 +775,11 @@ def pk_undo(group_id: str | None = None):
                 target = gs
                 break
     else:
-        # Find the most recently modified group (last one with undo history)
-        # Try current unfinished group first, then any group with undo_stack
-        multi_groups = [g for g in session_state.groups if len(g.images) > 1 and not g.finished]
-        single_groups = [g for g in session_state.groups if len(g.images) == 1 and not g.finished]
-        unfinished = multi_groups + single_groups
-        if unfinished and unfinished[0].undo_stack:
-            target = unfinished[0]
-        else:
-            # Find any group with undo history (most recent action)
-            for gs in reversed(session_state.groups):
-                if gs.undo_stack:
-                    target = gs
-                    break
+        # Find any group with undo history (most recent action)
+        for gs in reversed(session_state.groups):
+            if gs.undo_stack:
+                target = gs
+                break
 
     if not target:
         raise HTTPException(400, "Nothing to undo")
